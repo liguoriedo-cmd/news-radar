@@ -50,6 +50,37 @@ def _e(testo) -> str:
     return html.escape(str(testo or ""), quote=False)
 
 
+# I rifiuti di Telegram sono precisi ma criptici. Tradurli qui significa
+# che il dashboard mostrera' la causa invece del codice, e la causa dice
+# gia' cosa fare.
+SPIEGAZIONI = {
+    "CHAT_SEND_PLAIN_FORBIDDEN":
+        "il gruppo vieta al bot i messaggi di testo: rendilo amministratore",
+    "upgraded to a supergroup":
+        "il gruppo e' diventato un supergruppo e ha cambiato identificativo",
+    "chat not found":
+        "destinatario inesistente: identificativo sbagliato",
+    "bot was blocked":
+        "il bot e' stato bloccato dal destinatario",
+    "bot was kicked":
+        "il bot e' stato rimosso dal gruppo",
+    "not enough rights":
+        "al bot mancano i permessi per scrivere",
+}
+
+
+def _motivo(risposta) -> str:
+    """Il rifiuto di Telegram in italiano comprensibile."""
+    try:
+        grezzo = str((risposta.json() or {}).get("description", ""))
+    except ValueError:
+        grezzo = risposta.text[:120]
+    for chiave, spiegazione in SPIEGAZIONI.items():
+        if chiave.lower() in grezzo.lower():
+            return spiegazione
+    return grezzo[:120] or f"errore {risposta.status_code}"
+
+
 def _orario(voce: dict, fuso: ZoneInfo) -> str:
     try:
         q = datetime.fromisoformat(voce["quando"]).astimezone(fuso)
@@ -156,6 +187,10 @@ class Telegram:
         grezzo = chat or os.environ.get("TELEGRAM_CHAT_ID", "")
         self.chat = [c.strip() for c in str(grezzo).split(",") if c.strip()]
         self.s = requests.Session()
+        # Motivo dell'ultimo fallimento, per poterlo mostrare altrove. Quando
+        # e' il canale Telegram a rompersi non lo si puo' segnalare via
+        # Telegram: l'unico posto dove quel messaggio arriva e' il dashboard.
+        self.ultimo_errore: str | None = None
 
     @property
     def configurato(self) -> bool:
@@ -170,11 +205,13 @@ class Telegram:
         """
         if not self.configurato:
             log.info("Telegram non configurato: messaggio non inviato")
+            self.ultimo_errore = "bot o destinatario non configurati"
             return False
         if len(testo) > MAX_TESTO:
             testo = testo[:MAX_TESTO] + "\n<i>…messaggio troncato</i>"
 
         riusciti = 0
+        motivi: list[str] = []
         for destinatario in self.chat:
             try:
                 r = self.s.post(
@@ -190,6 +227,7 @@ class Telegram:
                 )
             except requests.RequestException as exc:
                 log.warning("invio a %s fallito: %s", destinatario, exc)
+                motivi.append(f"{destinatario}: rete non raggiungibile")
                 continue
             if r.status_code >= 400:
                 # Il corpo della risposta dice sempre perche': chat_id
@@ -197,8 +235,11 @@ class Telegram:
                 # indovina.
                 log.warning("Telegram ha rifiutato per %s (%s): %s",
                             destinatario, r.status_code, r.text[:200])
+                motivi.append(f"{destinatario}: {_motivo(r)}")
                 continue
             riusciti += 1
+
+        self.ultimo_errore = None if riusciti else " · ".join(motivi)
         return riusciti > 0
 
 
@@ -219,18 +260,28 @@ class Consegna:
         muto alle tre di notte lascia comunque la notifica sulla schermata di
         blocco, che e' esattamente cio' che si vuole evitare.
         """
+        # Lo stato del silenzio si legge dall'orologio anche quando non c'e'
+        # niente da mandare. Dichiararlo "falso" solo perche' la lista e'
+        # vuota renderebbe il registro bugiardo: a mezzanotte si leggerebbe
+        # "silenzio: False", e chi un giorno indagasse su un avviso mancato
+        # comincerebbe a cercare nel posto sbagliato.
+        zitto = self.silenzio.adesso(quando)
         if not voci:
-            return {"inviati": 0, "trattenuti": 0, "silenzio": False}
+            return {"inviati": 0, "trattenuti": 0, "silenzio": zitto, "errore": None}
 
-        if self.silenzio.adesso(quando):
+        if zitto:
             log.info("ore di silenzio: %d avvisi rimandati alla panoramica", len(voci))
-            return {"inviati": 0, "trattenuti": len(voci), "silenzio": True}
+            return {"inviati": 0, "trattenuti": len(voci), "silenzio": True,
+                    "errore": None}
 
         inviati = 0
         for v in voci:
             if self.tg.manda(componi(v, self.silenzio.fuso)):
                 inviati += 1
-        return {"inviati": inviati, "trattenuti": len(voci) - inviati, "silenzio": False}
+        return {"inviati": inviati, "trattenuti": len(voci) - inviati,
+                "silenzio": False,
+                # Se nemmeno uno e' partito, il canale e' rotto e va detto.
+                "errore": self.tg.ultimo_errore if inviati == 0 else None}
 
     def panoramica(self, testo: str) -> bool:
         return self.tg.manda(testo)

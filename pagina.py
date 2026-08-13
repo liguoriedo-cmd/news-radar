@@ -55,10 +55,18 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
-#   V1  13/08/2026  prima versione completa: dieci fonti, filtro a tre
-#                   livelli, panoramica del mattino, avvisi Telegram con
-#                   silenzio notturno.
-VERSIONE = "V1"
+#   V1.2 14/08/2026  segnalatore di stato in cima: la freschezza della
+#                    pagina la misura il browser, non il generatore, cosi'
+#                    una pagina ferma riesce a dichiararsi ferma. Stato dei
+#                    due canali di uscita, con la causa in chiaro quando
+#                    uno si rompe.
+#   V1.1 14/08/2026  il token GitHub non arrivava al container e la
+#                    pubblicazione taceva; il registro dichiarava
+#                    "silenzio: False" di notte quando non c'erano avvisi.
+#   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
+#                    livelli, panoramica del mattino, avvisi Telegram con
+#                    silenzio notturno.
+VERSIONE = "V1.2"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
@@ -109,6 +117,32 @@ h2{font-size:12.5px;text-transform:uppercase;letter-spacing:1.1px;color:var(--gr
 h2 em{font-style:normal;font-size:11px;text-transform:none;letter-spacing:0;
       color:var(--gr);opacity:.75;font-weight:400}
 
+/* ---- segnalatore di stato ---- */
+.stato{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+       background:var(--ca);border:1px solid var(--bo);border-radius:11px;
+       padding:11px 14px;margin-bottom:18px;font-size:13px}
+.stato .spia{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+             background:var(--gr);box-shadow:0 0 0 3px transparent}
+.stato.viva .spia{background:var(--bassa);box-shadow:0 0 0 3px rgba(74,222,128,.15);
+                  animation:battito 2.6s ease-in-out infinite}
+.stato.tarda .spia{background:var(--media);box-shadow:0 0 0 3px rgba(245,197,66,.15)}
+.stato.ferma .spia{background:var(--alta);box-shadow:0 0 0 3px rgba(255,92,77,.15)}
+@keyframes battito{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.stato.viva .spia{animation:none}}
+.stato .titolo{font-weight:640;letter-spacing:.01em}
+.stato.viva .titolo{color:var(--bassa)}
+.stato.tarda .titolo{color:var(--media)}
+.stato.ferma .titolo{color:var(--alta)}
+.stato .eta{color:var(--gr);font-variant-numeric:tabular-nums}
+.stato .canali{margin-left:auto;display:flex;gap:12px;flex-wrap:wrap;
+               color:var(--gr);font-size:12px}
+.stato .canali b{font-weight:600}
+.stato .canali .ko{color:var(--alta)}
+.stato .canali .ok{color:var(--bassa)}
+.guasto{background:rgba(255,92,77,.09);border:1px solid var(--alta);
+        border-radius:10px;padding:11px 14px;margin-bottom:18px;font-size:13.5px}
+.guasto b{color:var(--alta)}
+
 /* ---- riepilogo ---- */
 .riep{background:var(--ca2);border:1px solid var(--bo);border-radius:12px;
       padding:15px 16px;line-height:1.62;font-size:14.5px}
@@ -157,6 +191,46 @@ footer{color:var(--gr);font-size:11.5px;margin-top:34px;border-top:1px solid var
 """
 
 SCRIPT = """
+/* Il segnalatore lo decide il BROWSER, non il generatore.
+   Una pagina ferma non puo' scriversi da sola "sono ferma": se il radar si
+   spegne, l'ultima pagina che ha prodotto continuera' a dire che va tutto
+   bene, e sara' una bugia che invecchia. Qui invece si confronta l'ora di
+   generazione, incisa nella pagina, con l'ora di chi la sta guardando: la
+   diagnosi si fa al momento della lettura, e vale anche se il file e' fermo
+   da giorni. */
+(function(){
+  var el = document.getElementById('stato');
+  if (!el) return;
+  var nato = new Date(el.dataset.quando);
+  var soglia = parseFloat(el.dataset.soglia || '45');
+
+  function aggiorna(){
+    var min = (Date.now() - nato.getTime()) / 60000;
+    var eta = min < 1.5 ? 'adesso'
+            : min < 60  ? 'di ' + Math.round(min) + ' minuti fa'
+            : min < 48*60 ? 'di ' + Math.round(min/60) + ' ore fa'
+            : 'di ' + Math.round(min/1440) + ' giorni fa';
+    var classe, titolo;
+    if (min < soglia)        { classe='viva';  titolo='In linea'; }
+    else if (min < soglia*4) { classe='tarda'; titolo='In ritardo'; }
+    else                     { classe='ferma'; titolo='Non aggiornato'; }
+    el.className = 'stato ' + classe;
+    el.querySelector('.titolo').textContent = titolo;
+    el.querySelector('.eta').textContent = 'lettura ' + eta;
+    /* Orologio del lettore indietro rispetto alla generazione: succede quando
+       il fuso del dispositivo e' sballato. Meglio dirlo che dare una diagnosi
+       basata su un tempo negativo. */
+    if (min < -5) {
+      el.className = 'stato';
+      el.querySelector('.titolo').textContent = 'Ora incoerente';
+      el.querySelector('.eta').textContent = "l'orologio di questo dispositivo "
+        + 'sembra indietro';
+    }
+  }
+  aggiorna();
+  setInterval(aggiorna, 30000);
+})();
+
 document.querySelectorAll('.f button').forEach(b=>{
   b.onclick=()=>{
     const q=b.dataset.q;
@@ -253,8 +327,49 @@ def _riepilogo(testo: str, fuso: ZoneInfo) -> str:
     return "".join(f"<p>{_e(b)}</p>" for b in blocchi)
 
 
+def _segnalatore(adesso: datetime, salute: dict, cfg: dict) -> str:
+    """La striscia di stato in cima, piu' un riquadro se qualcosa e' rotto.
+
+    La classe iniziale e' volutamente neutra: il colore lo assegna il
+    browser dopo aver misurato l'eta' della pagina. Se il JavaScript non
+    girasse, si vedrebbe uno stato spento invece di un verde bugiardo.
+    """
+    soglia = float((cfg.get("dashboard") or {}).get("minuti_prima_di_ritardo", 45))
+    righe = [f'<div class="stato" id="stato" data-quando="{adesso.isoformat()}" '
+             f'data-soglia="{soglia:g}">',
+             '<span class="spia"></span>',
+             '<span class="titolo">Verifica…</span>',
+             '<span class="eta"></span>',
+             '<span class="canali">']
+
+    for nome, etichetta in (("telegram", "Telegram"), ("github", "GitHub")):
+        s = (salute or {}).get(nome) or {}
+        rotto = int(s.get("falliti_di_fila", 0)) > 0
+        classe = "ko" if rotto else ("ok" if s.get("ultimo_ok") else "")
+        simbolo = "✕" if rotto else ("✓" if s.get("ultimo_ok") else "–")
+        righe.append(f'<span class="{classe}">{etichetta} <b>{simbolo}</b></span>')
+    righe.append("</span></div>")
+
+    # Un canale rotto merita una spiegazione, non un simbolo. Vale soprattutto
+    # per Telegram: se e' lui a non funzionare, questa pagina e' l'unico posto
+    # in cui puoi venirlo a sapere.
+    for nome, etichetta in (("telegram", "Gli avvisi non partono"),
+                            ("github", "La pagina non si aggiorna online")):
+        s = (salute or {}).get(nome) or {}
+        n = int(s.get("falliti_di_fila", 0))
+        if n <= 0:
+            continue
+        motivo = _e(s.get("motivo") or "motivo non riportato")
+        coda = ("Il radar continua a raccogliere e filtrare: si e' rotto "
+                "solo il canale." if nome == "telegram" else
+                "Gli avvisi su Telegram continuano ad arrivare.")
+        righe.append(f'<div class="guasto"><b>{etichetta}</b> — da {n} '
+                     f'{"giro" if n == 1 else "giri"}: {motivo}. {coda}</div>')
+    return "".join(righe)
+
+
 def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
-               riepilogo: dict | None = None) -> str:
+               riepilogo: dict | None = None, salute: dict | None = None) -> str:
     """L'intera pagina come stringa. Nessun file toccato: cosi' e' provabile."""
     try:
         fuso = ZoneInfo(str(((cfg.get("avvisi") or {}).get("silenzio") or {})
@@ -275,8 +390,9 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
 
     corpo = ['<div class="guscio">',
              f'<h1>📡 Radar notizie <span class="ver">{_e(VERSIONE)}</span></h1>',
-             f'<div class="sotto">aggiornato {adesso.strftime("%d/%m/%Y alle %H:%M")}'
+             f'<div class="sotto">generata {adesso.strftime("%d/%m/%Y alle %H:%M")}'
              f' · ultime 24 ore</div>',
+             _segnalatore(adesso, salute or {}, cfg),
              '<div class="conta">']
     for liv, (nome, _) in LIVELLI.items():
         corpo.append(f'<div class="{liv}"><b>{conte[liv]}</b>'
@@ -360,19 +476,21 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
 
 
 def scrivi(voci: list[dict], cfg: dict, cartella: Path,
-           riepilogo: dict | None = None) -> Path:
+           riepilogo: dict | None = None, salute: dict | None = None) -> Path:
     """Scrive index.html e dati.json. Restituisce il percorso della pagina."""
     cartella = Path(cartella)
     cartella.mkdir(parents=True, exist_ok=True)
 
     pagina = cartella / "index.html"
-    pagina.write_text(costruisci(voci, cfg, riepilogo=riepilogo), encoding="utf-8")
+    pagina.write_text(costruisci(voci, cfg, riepilogo=riepilogo, salute=salute),
+                      encoding="utf-8")
 
     # I dati anche in JSON: se un domani vuoi farci un grafico o leggerli da
     # un altro programma, non devi rileggerli dall'HTML.
     (cartella / "dati.json").write_text(
         json.dumps({"aggiornato": datetime.now(timezone.utc).isoformat(),
-                    "riepilogo": riepilogo or {}, "voci": voci}, ensure_ascii=False),
+                    "riepilogo": riepilogo or {}, "salute": salute or {},
+                    "voci": voci}, ensure_ascii=False),
         encoding="utf-8")
 
     # GitHub Pages passa i file per Jekyll, che ignora tutto cio' che comincia
@@ -419,6 +537,32 @@ if __name__ == "__main__":
     ]
     for nome, v, voluto in casi:
         prove.append((nome, livello(v) == voluto))
+
+    # 3) Il segnalatore non deve mai partire "verde".
+    sano = {"telegram": {"ultimo_ok": "x", "falliti_di_fila": 0},
+            "github": {"ultimo_ok": "x", "falliti_di_fila": 0}}
+    s = costruisci(ostile, {}, salute=sano)
+    prove += [
+        ("lo stato parte neutro, non verde",
+         'class="stato" id="stato"' in s and "stato viva" not in s),
+        ("la pagina incide l'ora di generazione",
+         bool(re.search(r'data-quando="\d{4}-\d\d-\d\dT', s))),
+        ("il browser riceve la soglia", 'data-soglia="45"' in s),
+        ("nessun riquadro di guasto quando va tutto bene",
+         'class="guasto"' not in s),
+    ]
+
+    rotto = {"telegram": {"falliti_di_fila": 3, "motivo": "<b>ostile</b> & rotto"},
+             "github": {"ultimo_ok": "x", "falliti_di_fila": 0}}
+    r = costruisci(ostile, {}, salute=rotto)
+    prove += [
+        ("un canale rotto compare col suo motivo",
+         'class="guasto"' in r and "da 3 giri" in r),
+        ("anche il motivo di guasto viene protetto",
+         "&lt;b&gt;ostile&lt;/b&gt;" in r),
+        ("il guasto di Telegram spiega che il radar continua",
+         "si e' rotto solo il canale" in r or "solo il canale" in r),
+    ]
 
     for nome, ok in prove:
         print(f"  {'ok ' if ok else 'NO '} {nome}")

@@ -261,6 +261,13 @@ dashboard:
   # perche' hanno gia' superato una soglia pensata per l'interruzione.
   soglia_media: 55
 
+  # Dopo quanti minuti dalla generazione la pagina va considerata "in
+  # ritardo". Il giro veloce e' ogni 3 minuti e il battito ripubblica ogni
+  # 30 al massimo: 45 lascia margine per un ritardo di GitHub Pages senza
+  # far scattare falsi allarmi. Oltre il quadruplo (3 ore) diventa "non
+  # aggiornato", cioe' probabilmente il radar e' fermo.
+  minuti_prima_di_ritardo: 45
+
 # ---------------------------------------------------------------------
 # PUBBLICAZIONE SU GITHUB PAGES
 #
@@ -281,6 +288,17 @@ pubblicazione:
   # Solo la pagina. dati.json pesa il doppio e non lo guarda nessuno da
   # browser: ogni pubblicazione e' un commit che resta li' per sempre.
   file: ["index.html"]
+
+  # Ogni quanto ripubblicare comunque, anche a contenuto invariato. Senza,
+  # in una notte tranquilla la pagina online resterebbe ferma per ore e il
+  # segnalatore in cima direbbe "non aggiornato" pur essendo il radar vivo.
+  # A 30 minuti il costo massimo e' 48 commit al giorno.
+  battito_minuti: 30
+
+  # Dopo quanti fallimenti consecutivi avvisare su Telegram. Solo per
+  # GitHub: se a rompersi e' Telegram, annunciarlo via Telegram non
+  # servirebbe a niente — quel caso lo segnala il dashboard.
+  allarme_dopo: 3
 
   # IL RIEPILOGO IN CIMA ALLA PAGINA
   #

@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -70,6 +71,12 @@ class Pubblicatore:
         # oppure "/docs", e "/docs" e' preferibile: tiene la pagina separata
         # dal codice invece di mescolarli nella stessa cartella.
         self.cartella_remota = str(p.get("cartella_remota", "docs")).strip("/")
+        # Ogni quanto ripubblicare comunque, anche se il contenuto non e'
+        # cambiato. Senza, in una notte tranquilla la pagina online resterebbe
+        # ferma per ore e il segnalatore in cima la dichiarerebbe "offline"
+        # pur essendo il radar perfettamente vivo: il battito e' cio' che
+        # distingue "non e' successo niente" da "si e' fermato tutto".
+        self.battito_minuti = float(p.get("battito_minuti", 30))
         self.token = os.environ.get("GITHUB_TOKEN", "")
         self.stato_path = Path(stato_path)
         self.s = requests.Session()
@@ -77,6 +84,20 @@ class Pubblicatore:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         })
+
+        # Una pubblicazione accesa ma incompleta e' il caso peggiore: il
+        # radar continua a funzionare, la pagina online si congela, e non
+        # lo dice nessuno. Qui la si dichiara subito, all'avvio, una volta
+        # sola — la configurazione non cambia da sola durante l'esecuzione,
+        # quindi ripeterlo a ogni giro sarebbe solo rumore nei log.
+        if self.attiva and not self.configurato:
+            manca = "GITHUB_TOKEN" if not self.token else "il nome del repository"
+            log.warning(
+                "pubblicazione ACCESA ma non utilizzabile: manca %s. "
+                "La pagina resta scritta sul NAS e non viene aggiornata online. "
+                "Se il token e' nel file .env, controlla che docker-compose.yml "
+                "lo passi al container: le variabili non elencate li' dentro "
+                "non esistono per il programma.", manca)
 
     @property
     def configurato(self) -> bool:
@@ -90,12 +111,21 @@ class Pubblicatore:
         except (OSError, ValueError):
             return {}
 
+    def _minuti_dall_ultima(self) -> float:
+        try:
+            q = json.loads(self.stato_path.read_text()).get("ultima_pubblicazione")
+            passato = datetime.now(timezone.utc) - datetime.fromisoformat(q)
+            return passato.total_seconds() / 60.0
+        except (OSError, ValueError, TypeError):
+            return 1e9          # mai pubblicato: il battito scatta subito
+
     def _ricorda(self, nuove: dict) -> None:
         try:
             stato = json.loads(self.stato_path.read_text())
         except (OSError, ValueError):
             stato = {}
         stato["pubblicate"] = {**stato.get("pubblicate", {}), **nuove}
+        stato["ultima_pubblicazione"] = datetime.now(timezone.utc).isoformat()
         try:
             tmp = self.stato_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(stato, ensure_ascii=False))
@@ -158,7 +188,8 @@ class Pubblicatore:
             return {"pubblicati": 0, "motivo": "non configurata"}
 
         note = self._impronte()
-        nuove, fatti = {}, 0
+        battito = self._minuti_dall_ultima() >= self.battito_minuti
+        nuove, fatti, errori = {}, 0, []
         for nome in self.file:
             f = Path(cartella) / nome
             if not f.exists():
@@ -167,17 +198,22 @@ class Pubblicatore:
                 imp = _impronta(f.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue
-            if note.get(nome) == imp:
+            if note.get(nome) == imp and not battito:
                 continue                     # identico a quello gia' online
             remoto = f"{self.cartella_remota}/{nome}" if self.cartella_remota else nome
-            if self._carica(f, remoto, f"radar: aggiornamento {nome}"):
+            motivo = "battito" if (note.get(nome) == imp) else "aggiornamento"
+            if self._carica(f, remoto, f"radar: {motivo} {nome}"):
                 nuove[nome] = imp
                 fatti += 1
+            else:
+                errori.append(nome)
 
         if nuove:
             self._ricorda(nuove)
-            log.info("pubblicati su GitHub: %s", ", ".join(nuove))
-        return {"pubblicati": fatti, "invariati": len(self.file) - fatti}
+            log.info("pubblicati su GitHub: %s%s", ", ".join(nuove),
+                     " (battito)" if battito else "")
+        return {"pubblicati": fatti, "invariati": len(self.file) - fatti - len(errori),
+                "errore": f"caricamento fallito: {', '.join(errori)}" if errori else None}
 
 
 if __name__ == "__main__":

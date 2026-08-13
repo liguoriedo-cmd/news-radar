@@ -142,21 +142,80 @@ class Radar:
         # Il dashboard si riscrive ogni ciclo con le ultime 24 ore, anche
         # quando non e' successo niente: una pagina ferma a ieri sembra
         # rotta, e non si distingue da un radar che si e' davvero fermato.
+        vecchio = self._leggi(self.stato_path, {})
         pagina.scrivi(self.archivio(ore=24), self.cfg, self.sito,
-                      riepilogo=self._leggi(self.stato_path, {}).get("riepilogo"))
+                      riepilogo=vecchio.get("riepilogo"),
+                      salute=vecchio.get("salute"))
 
         # La pubblicazione e' l'ultimo passo e il meno importante: se GitHub
         # non risponde, la pagina resta scritta sul NAS e il giro dopo ci
         # riprova. Perdere il dashboard remoto e' un fastidio, perdere gli
         # avvisi sarebbe un guasto — per questo sta qui in fondo.
+        pub = {"pubblicati": 0, "errore": None}
         try:
-            stat.update(pubblicati=self.pubblicatore.pubblica(self.sito)["pubblicati"])
-        except Exception:
+            pub = self.pubblicatore.pubblica(self.sito)
+        except Exception as exc:
             log.exception("pubblicazione fallita, il radar continua")
+            pub["errore"] = f"{type(exc).__name__}"
 
-        stat.update(esito, completa=completa)
+        self._registra_salute(esito, pub, completa)
+
+        stat.update(esito, completa=completa, pubblicati=pub["pubblicati"])
         log.info("ciclo concluso: %s", stat)
         return stat
+
+    # -- salute dei due canali di uscita -------------------------------------
+
+    def _registra_salute(self, telegram: dict, github: dict, completa: bool) -> None:
+        """Tiene il conto di cosa funziona e cosa no, per il dashboard.
+
+        Serve a rispondere alla sola domanda che conta guardando la pagina:
+        "quello che vedo e' aggiornato?". Il dashboard e' anche l'UNICO posto
+        dove si puo' segnalare un guasto di Telegram — se e' il canale degli
+        avvisi a essere rotto, avvisare via Telegram sarebbe assurdo.
+        """
+        adesso = datetime.now(timezone.utc).isoformat()
+        stato = self._leggi(self.stato_path, {})
+        salute = stato.get("salute") or {}
+        salute["ultimo_giro"] = adesso
+        salute["giro_completo"] = bool(completa)
+
+        for nome, esito in (("telegram", telegram), ("github", github)):
+            s = salute.get(nome) or {"falliti_di_fila": 0}
+            if esito.get("errore"):
+                s["falliti_di_fila"] = int(s.get("falliti_di_fila", 0)) + 1
+                s["ultimo_errore"] = adesso
+                s["motivo"] = str(esito["errore"])[:200]
+            elif esito.get("inviati") or esito.get("pubblicati"):
+                s.update(falliti_di_fila=0, ultimo_ok=adesso, motivo=None)
+            salute[nome] = s
+
+        stato["salute"] = salute
+        self._scrivi(self.stato_path, stato)
+        self._allarme_pubblicazione(salute)
+
+    def _allarme_pubblicazione(self, salute: dict) -> None:
+        """Avvisa su Telegram se GitHub continua a rifiutare.
+
+        Solo per GitHub, e la ragione e' semplice: Telegram funziona, quindi
+        il messaggio arriva. Il caso opposto — Telegram rotto — non puo'
+        essere annunciato via Telegram, e resta affidato al dashboard.
+
+        Si avvisa una volta sola per guasto, alla terza consecutiva. Un
+        messaggio a ogni giro sarebbe piu' fastidioso del guasto.
+        """
+        g = salute.get("github") or {}
+        falliti = int(g.get("falliti_di_fila", 0))
+        soglia = int((self.cfg.get("pubblicazione") or {}).get("allarme_dopo", 3))
+        if falliti != soglia:
+            return
+        self.consegna.tg.manda(
+            "⚠️ <b>Radar notizie</b>\n"
+            f"La pubblicazione su GitHub fallisce da {falliti} giri: "
+            f"<i>{A._e(g.get('motivo') or 'motivo non riportato')}</i>\n\n"
+            "Gli avvisi continuano ad arrivare: si e' fermato solo "
+            "l'aggiornamento della pagina web. La causa piu' probabile e' un "
+            "token GitHub scaduto.")
 
     # -- il riepilogo in cima al dashboard -----------------------------------
 

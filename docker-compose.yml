@@ -23,6 +23,12 @@ services:
       # non ti avvisa: meta' dello strumento resta spenta.
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # Pubblicazione della pagina su GitHub Pages. ATTENZIONE: il file .env
+      # non entra nell'immagine, quindi il programma non puo' leggerlo da
+      # solo — dentro il container esistono soltanto le variabili elencate
+      # qui. Ogni variabile nuova nel codice va aggiunta anche in questo
+      # elenco, altrimenti risulta semplicemente vuota.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
     # Il container non deve scrivere fuori dai volumi ne' acquisire privilegi.
     security_opt:
