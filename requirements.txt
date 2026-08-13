@@ -1,0 +1,12 @@
+# Versioni fissate a quelle su cui il radar e' stato provato il 13/08/2026.
+# Non sono "almeno queste": sono esattamente queste. Un aggiornamento
+# silenzioso di feedparser o requests dentro un container che si ricostruisce
+# da solo e' il modo classico per svegliarsi con un radar muto e nessuna idea
+# di cosa sia cambiato.
+feedparser==6.0.12
+requests==2.32.5
+PyYAML==6.0.3
+
+# Serve solo alla panoramica del mattino: una chiamata al giorno. Se manca,
+# il radar continua a funzionare e la panoramica esce in forma deterministica.
+anthropic==0.121.0

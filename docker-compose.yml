@@ -1,0 +1,35 @@
+services:
+  radar:
+    build: .
+    container_name: news-radar
+    restart: unless-stopped
+
+    volumes:
+      # Configurazione, memoria e archivio. E' l'unica cartella da salvare
+      # se rifai il container: dentro c'e' la memoria del "gia' visto", che
+      # e' cio' che impedisce al radar di rimandarti le stesse notizie.
+      - ./data:/data
+
+      # La pagina generata. Da qui la prende chi la pubblica: il compito del
+      # radar finisce quando ha scritto il file.
+      - ./docs:/sito
+
+    environment:
+      - TZ=Europe/Rome
+      # Una chiamata al giorno, per la panoramica delle 07:30. Se manca, la
+      # panoramica esce lo stesso in forma deterministica.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Senza questi due il radar raccoglie, filtra e scrive la pagina, ma
+      # non ti avvisa: meta' dello strumento resta spenta.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+
+    # Il container non deve scrivere fuori dai volumi ne' acquisire privilegi.
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

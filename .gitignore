@@ -1,0 +1,24 @@
+# MAI nel repository. Se il progetto finisce su GitHub in chiaro, questo file
+# e' l'unica cosa che non deve seguirlo: contiene la chiave Anthropic e il
+# token del bot Telegram. Un token pubblicato va considerato bruciato — chi
+# lo trova puo' scrivere ai tuoi contatti a nome del bot.
+.env
+
+.venv/
+__pycache__/
+*.pyc
+
+# Scorie di macOS
+.DS_Store
+
+# I dati grezzi della pagina: 77 KB che nessuno apre da browser, riscritti a
+# ogni giro. Il radar pubblica solo index.html, e ogni versione di un file
+# resta nel repository per sempre.
+docs/dati.json
+
+# Stato locale del radar: memoria del "gia' visto", archivio e riepilogo.
+# Non vanno versionati — cambiano a ogni giro e non servono a nessun altro.
+data/stato.json
+data/memoria.json
+data/archivio.json
+data/*.tmp

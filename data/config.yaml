@@ -1,0 +1,299 @@
+# =====================================================================
+# Radar notizie — configurazione
+#
+# Il problema di questo sistema non e' raccogliere: e' decidere cosa NON
+# mandarti. Fra calendario, trimestrali e testate arrivano centinaia di
+# voci al giorno. Un bot che le notifica tutte viene silenziato in due
+# giorni, e a quel punto non serve piu' a niente.
+#
+# Ogni soglia qui sotto esiste per tenere basso il numero di interruzioni.
+# Se ricevi troppi avvisi, alza le soglie invece di sopportarli.
+# =====================================================================
+
+# RITMO — e' qui che si decide quanto ti arriva in ritardo una notizia.
+#
+# Il ritardo medio e' meta' dell'intervallo: con un giro ogni 10 minuti una
+# notizia ti raggiunge in media dopo 5. Per questo i giri sono due.
+#
+# VELOCE: testate, banche centrali e calendario economico di oggi. Sono ~9
+#   richieste, una quindicina di secondi. Il calendario di oggi e' la fonte
+#   in cui compare il valore effettivo di un dato appena uscito: e' li' che
+#   i minuti contano davvero.
+# COMPLETO: aggiunge il calendario di domani, le 363 trimestrali e i 100
+#   depositi SEC. Sono elenchi che si muovono di ore: interrogarli ogni tre
+#   minuti sarebbe traffico sprecato verso servizi gratuiti che ci ospitano
+#   per cortesia.
+ritmo:
+  veloce_minuti: 3
+  completo_minuti: 20
+
+pausa_fra_fonti_secondi: 1.5    # rispetta i limiti dei flussi gratuiti
+memoria_giorni: 7               # per quanto si ricorda una voce gia' vista
+
+# Richiesto dalla SEC per accedere a EDGAR: nome e contatto reali.
+# Senza, EDGAR risponde 403 e viene saltato.
+contatto_sec: "Radar Notizie Personale liguoriedo@gmail.com"
+
+# ---------------------------------------------------------------------
+# FONTI
+# Verificate sul campo il 13/08/2026. Reuters (301) e BLS (403) sono
+# escluse perche' non raggiungibili, non per scelta editoriale.
+# ---------------------------------------------------------------------
+feed:
+  - nome: "CNBC"
+    url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"
+    tipo: notizia
+    attivo: true
+
+  - nome: "MarketWatch"
+    url: "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+    tipo: notizia
+    attivo: true
+
+  - nome: "Yahoo Finance"
+    url: "https://finance.yahoo.com/news/rssindex"
+    tipo: notizia
+    attivo: true
+
+  - nome: "Investing.com"
+    url: "https://www.investing.com/rss/news.rss"
+    tipo: notizia
+    attivo: true
+
+  # Fonti primarie: nessun intermediario, nessuna interpretazione.
+  # Quando la BCE o la Fed pubblicano, questa e' la notizia, non il commento.
+  - nome: "BCE"
+    url: "https://www.ecb.europa.eu/rss/press.html"
+    tipo: ufficiale
+    attivo: true
+
+  - nome: "Federal Reserve"
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    tipo: ufficiale
+    attivo: true
+
+  # I forum sono i piu' rapidi sulle notizie improvvise e i piu' rumorosi
+  # su tutto il resto. Restano a punteggio basso: servono a confermare,
+  # non a innescare.
+  - nome: "Reddit r/stocks"
+    url: "https://www.reddit.com/r/stocks/new/.rss"
+    tipo: forum
+    attivo: true
+    max_voci: 25
+    veloce: false               # non innesca mai avvisi: inutile interrogarlo spesso
+
+calendario:
+  attivo: true
+  giorni_avanti: 2              # oggi e domani, per il preavviso
+
+edgar:
+  attivo: true
+  moduli: ["8-K"]               # eventi rilevanti comunicati dalle societa'
+
+# ---------------------------------------------------------------------
+# CHE COSA MERITA UN'INTERRUZIONE
+#
+# Un avviso immediato costa la tua attenzione. Deve valerla.
+# ---------------------------------------------------------------------
+avvisi:
+  # Un dato macro conta solo se si DISCOSTA dalle attese: il valore atteso
+  # e' gia' nei prezzi. Qui si misura lo scarto in percentuale del valore
+  # atteso; sotto questa soglia il dato e' "in linea" e non interrompe.
+  sorpresa_minima_pct: 15
+
+  # La percentuale da sola inganna sui numeri piccoli: un indicatore che
+  # passa da 0,2 a 0,3 e' "+50%", ma 0,1 e' il minimo scarto rappresentabile
+  # in un dato pubblicato con un decimale — un solo scatto, cioe' rumore.
+  # Qui si chiede che la differenza valga almeno due scatti oltre alla
+  # percentuale. E' la regola che tiene fuori la stima giornaliera del
+  # Cleveland CPI e fa passare i sussidi di disoccupazione (202K -> 209K,
+  # settemila scatti).
+  scatti_minimi: 2
+
+  # Eventi che contano indipendentemente dal numero, perche' e' la decisione
+  # stessa a muovere i mercati. Confronto sul titolo, senza distinzione fra
+  # maiuscole e minuscole.
+  eventi_sempre:
+    - "interest rate"
+    - "fomc"
+    - "federal funds"
+    - "nonfarm payroll"
+    - "unemployment rate"
+    - "cpi"
+    - "consumer price"
+    - "ppi"
+    - "gdp"
+    - "retail sales"
+    - "jobless claims"
+
+  # Solo questi paesi generano avvisi immediati. Il calendario Nasdaq copre
+  # decine di paesi: senza questo filtro arriverebbero avvisi sull'indice
+  # dei prezzi neozelandese.
+  paesi: ["United States", "Euro", "Germany", "Italy", "United Kingdom", "China"]
+
+  # Le parole sono su due livelli, e la differenza conta.
+  #
+  # FORTI: una sola basta a farti interrompere. Sono i termini che quando
+  # compaiono in un titolo la notizia e' quasi sempre quella vera.
+  parole_forti:
+    - "powell"
+    - "lagarde"
+    - "fomc"
+    - "rate cut"
+    - "rate hike"
+    - "taglio dei tassi"
+    - "monetary policy"
+    - "emergency meeting"
+    - "circuit breaker"
+    # Un annuncio sui dazi muove i mercati come una decisione sui tassi, e
+    # stava fra le parole deboli: da sola non bastava, quindi "la Casa Bianca
+    # annuncia dazi su tutte le importazioni cinesi" finiva in fondo alla
+    # pagina. Misurata sui dati veri, "tariff" compare in 3 voci su 680: e'
+    # rara abbastanza da poter innescare da sola.
+    - "tariff"
+    # Stessa natura, ma non misurate: nel campione del 13/08 non comparivano
+    # mai. Sono qui perche' quando compaiono non sono mai ordinaria
+    # amministrazione. Se dovessero rivelarsi rumorose, spostale fra le
+    # parole rilevanti.
+    - "sanctions"
+    - "export ban"
+
+  # RILEVANTI: da sole non bastano. "nasdaq" compare in un titolo su tre e
+  # "fed" in mezzo giornale: se una parola qui dentro innescasse un avviso,
+  # il telefono suonerebbe tutto il giorno. Ne servono due distinte.
+  parole_chiave:
+    - "fed"
+    - "bce"
+    - "ecb"
+    - "inflation"
+    - "inflazione"
+    - "recession"
+    - "s&p 500"
+    - "nasdaq"
+    - "treasury"
+    - "yield"
+    - "jobs report"
+
+  # Strumenti e societa' che segui. Una notizia o un deposito che li nomina
+  # passa comunque, anche senza parole chiave.
+  watchlist: ["SPY", "QQQ", "NVDA"]
+
+  # I ticker si cercano rispettando le maiuscole — "SPY" e' un fondo, "spy"
+  # e' una spia — ma nessun giornalista scrive "NVDA" nel titolo: scrive
+  # "Nvidia". Qui si dice a che nomi corrisponde ogni simbolo.
+  alias:
+    NVDA: ["nvidia"]
+    SPY: ["s&p 500", "sp 500", "standard & poor"]
+    QQQ: ["nasdaq 100"]
+
+  # Parole che, sul canale di chi le pubblica, non distinguono nulla: ogni
+  # comunicato della BCE contiene "ECB", compreso l'invito al concerto
+  # all'aperto. Su quella fonte la parola viene ignorata; altrove (in un
+  # titolo di giornale, per esempio) continua a valere.
+  parole_proprie:
+    BCE: ["ecb", "bce"]
+    Federal Reserve: ["fed", "federal reserve"]
+
+  # Parole che tolgono a una voce il diritto di interromperti, anche quando
+  # contiene tutte le parole giuste. Le banche centrali pubblicano nomine,
+  # convegni e inviti sullo stesso canale delle decisioni: "la Fed annuncia i
+  # responsabili della sua task force" contiene "monetary policy" e non muove
+  # un prezzo. La voce resta sul dashboard, non ti arriva sul telefono.
+  #
+  # Nota: "conference" NON e' in questa lista, e volutamente — la conferenza
+  # stampa di Powell dopo il FOMC e' uno degli eventi piu' importanti.
+  parole_veto:
+    - "task force"
+    - "symposium"
+    - "workshop"
+    - "invite"
+    - "appoint"
+    - "award"
+    - "anniversary"
+    - "exhibition"
+    - "vacancy"
+    - "obituary"
+    # Il riepilogo di giornata che Yahoo e simili aggiornano di continuo.
+    # Contiene sempre "S&P 500", "Nasdaq" e "inflation", quindi supera ogni
+    # regola, ma e' una cronaca: quando arriva, quello che dice lo sai gia'.
+    - "stock market today"
+
+  # ORE DI SILENZIO
+  # Di notte gli avvisi non vengono mandati: restano nell'archivio e li
+  # trovi nella panoramica delle 07:30, segnalati come arrivati nella notte.
+  # Non e' un invio muto — un messaggio silenzioso lascia comunque la
+  # notifica sulla schermata di blocco, che e' cio' che si vuole evitare.
+  silenzio:
+    attivo: true
+    da: "23:00"
+    a: "07:00"
+    fuso: "Europe/Rome"
+
+  # Tetto rigido di interruzioni per ciclo (un ciclo = 10 minuti). Gli avvisi
+  # in eccesso non spariscono: scendono sul dashboard. Serve a limitare il
+  # danno se una fonte cambia formato e comincia a produrre spazzatura.
+  max_avvisi_per_ciclo: 5
+
+  # Solo i depositi di societa' abbastanza grandi da muovere il mercato:
+  # di 8-K ne vengono depositati centinaia al giorno.
+  solo_watchlist_per_depositi: true
+
+# ---------------------------------------------------------------------
+# PANORAMICA DEL MATTINO
+# ---------------------------------------------------------------------
+panoramica:
+  ora: "07:30"                  # ora italiana
+  fuso: "Europe/Rome"
+  max_voci: 40                  # quante voci passare al riassunto
+
+  # Con una chiave Anthropic la panoramica e' un discorso di dieci righe.
+  # Senza, resta un elenco raggruppato e ordinato per importanza: meno
+  # piacevole da leggere, identico nei contenuti, e a costo zero.
+  riassunto_ia: true
+  modello: "claude-haiku-4-5"
+
+# ---------------------------------------------------------------------
+# DASHBOARD
+# ---------------------------------------------------------------------
+dashboard:
+  # Sotto questo punteggio una voce e' "bassa importanza": contesto, non
+  # segnale. Gli avvisi sono sempre "alta" a prescindere dal punteggio,
+  # perche' hanno gia' superato una soglia pensata per l'interruzione.
+  soglia_media: 55
+
+# ---------------------------------------------------------------------
+# PUBBLICAZIONE SU GITHUB PAGES
+#
+# Il NAS esegue e spinge la pagina su GitHub, che si limita a servirla.
+# Gli avvisi Telegram NON passano di qui: partono dal NAS direttamente,
+# quindi se GitHub e' lento o non risponde continuano ad arrivare puntuali.
+#
+# Serve GITHUB_TOKEN nel file .env — un "fine-grained token" ristretto a
+# questo solo repository, con il permesso "Contents: Read and write" e
+# nient'altro.
+# ---------------------------------------------------------------------
+pubblicazione:
+  attiva: false                 # si accende quando il NAS avra' il suo token
+  repo: "liguoriedo-cmd/news-radar"
+  ramo: "main"
+  cartella_remota: "docs"       # GitHub Pages e' configurato per servire /docs
+
+  # Solo la pagina. dati.json pesa il doppio e non lo guarda nessuno da
+  # browser: ogni pubblicazione e' un commit che resta li' per sempre.
+  file: ["index.html"]
+
+  # IL RIEPILOGO IN CIMA ALLA PAGINA
+  #
+  # Non c'e' niente da regolare, ed e' voluto: il riepilogo e' esattamente
+  # la panoramica delle 07:30 che arriva su Telegram, lo stesso identico
+  # testo. UNA chiamata al modello al giorno, ~0,4 centesimi, cioe' circa
+  # 12 centesimi al mese.
+  #
+  # Durante il giorno il riepilogo resta quello del mattino e invecchia: e'
+  # il compromesso giusto, perche' quello che succede nel frattempo lo
+  # trovi comunque sotto, negli avvisi e nelle voci in evidenza — che sono
+  # gratis, immediati e non passano da nessuna parafrasi.
+  #
+  # L'unica eccezione e' il giorno dell'installazione: il primo riepilogo
+  # viene scritto subito, per non lasciare un riquadro vuoto in attesa
+  # della prima mattina. Una volta sola, non una al giorno.
