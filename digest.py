@@ -59,6 +59,12 @@ Formato — il testo va su Telegram, che NON interpreta il markdown:
 - Niente #, **, *, _ o tabelle. Solo testo semplice e, se servono, elenchi
   che cominciano con "• ".
 - Le righe si contano davvero: dodici righe sono dodici, non cinque paragrafi.
+- DATE ESPLICITE, mai riferimenti relativi. Scrivi "giovedi' 14 agosto",
+  non "oggi", "ieri", "stanotte", "questa mattina", "la scorsa settimana".
+  La rassegna viene riletta a distanza e finisce in un archivio: "ieri" non
+  significa niente per chi la rilegge fra un mese, e nemmeno per te quando
+  la ritrovi. L'unica eccezione e' la riga sul calendario, dove "in giornata"
+  e' accettabile perche' la data e' gia' nel titolo della rassegna.
 - Le parentesi quadre nell'elenco che ricevi sono notazione di servizio, non
   testo: servono a te per sapere di chi e' un dato. Non riprodurle mai.
   Si scrive "negli Stati Uniti i sussidi sono saliti", non "i sussidi
@@ -185,9 +191,27 @@ def con_modello(voci: list[dict], calendario: list[dict], cfg: dict,
     elenco = "\n".join(_riga(v) for v in _ordina(voci)[:max_voci])
     oggi = "\n".join(_riga(v) for v in calendario[:15]) or "(niente in calendario)"
 
+    # Il modello non ha un orologio: senza queste due righe non puo' scrivere
+    # date esplicite, e ripiegherebbe su "ieri" e "stanotte" per forza.
+    GIORNI = ("lunedi'", "martedi'", "mercoledi'", "giovedi'", "venerdi'",
+              "sabato", "domenica")
+    MESI = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+            "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre")
+
+    def _data(d: datetime) -> str:
+        return f"{GIORNI[d.weekday()]} {d.day} {MESI[d.month - 1]} {d.year}"
+
+    ora = datetime.now(timezone.utc)
+    ieri = ora - timedelta(days=1)
+
     contenuto = (
+        f"<date>\n"
+        f"oggi e' {_data(ora)}; il giorno precedente e' {_data(ieri)}.\n"
+        f"Le voci qui sotto coprono le ultime 24 ore, quindi ricadono su "
+        f"questi due giorni: scrivi sempre la data per esteso, mai 'ieri' "
+        f"o 'stanotte'.\n</date>\n\n"
         "<voci>\n" + (elenco or "(nessuna voce nelle ultime 24 ore)") + "\n</voci>\n\n"
-        "<calendario_oggi>\n" + oggi + "\n</calendario_oggi>\n\n"
+        "<calendario_di_oggi>\n" + oggi + "\n</calendario_di_oggi>\n\n"
         "Scrivi la panoramica del mattino."
     )
 

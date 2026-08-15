@@ -148,6 +148,12 @@ class Silenzio:
         self.attivo = bool(s.get("attivo", True))
         self.da = self._ora(s.get("da", "23:00"), 23)
         self.a = self._ora(s.get("a", "07:00"), 7)
+        # Che cosa ha il diritto di svegliarti. Di notte la soglia non e' la
+        # stessa del giorno: passano solo le fonti primarie delle banche
+        # centrali, dove una pubblicazione E' la decisione. Tutto il resto
+        # non viene inviato — ne' subito ne' dopo — e resta sul dashboard.
+        self.passano = [str(t).strip().lower()
+                        for t in (s.get("passano_di_notte") or ["ufficiale"])]
         try:
             self.fuso = ZoneInfo(str(s.get("fuso", "Europe/Rome")))
         except Exception:
@@ -254,11 +260,16 @@ class Consegna:
     def avvisi(self, voci: list[dict], quando: datetime | None = None) -> dict:
         """Manda gli avvisi. Restituisce cosa e' stato fatto e perche'.
 
-        Durante le ore di silenzio non manda niente: le voci restano
-        nell'archivio e finiscono nella panoramica del mattino. Non e' un
-        invio "silenzioso" ma un mancato invio, ed e' voluto — un messaggio
-        muto alle tre di notte lascia comunque la notifica sulla schermata di
-        blocco, che e' esattamente cio' che si vuole evitare.
+        Di notte vale una soglia piu' alta, non un divieto: passano le
+        decisioni delle banche centrali — dove la pubblicazione stessa E' il
+        fatto — e suonano davvero, perche' se ti svegliano deve valerne la
+        pena. Tutto il resto NON viene inviato, ne' subito ne' la mattina
+        dopo: resta sul dashboard e viene raccontato nel riassunto.
+
+        La consegna posticipata e' stata tolta di proposito. Riversare gli
+        arretrati alle 07:30 trasformava la rassegna in una raffica di
+        notifiche, e ogni messaggio arrivava con ore di ritardo sul fatto che
+        raccontava: informazione vecchia con l'aria di essere appena arrivata.
         """
         # Lo stato del silenzio si legge dall'orologio anche quando non c'e'
         # niente da mandare. Dichiararlo "falso" solo perche' la lista e'
@@ -270,9 +281,22 @@ class Consegna:
             return {"inviati": 0, "trattenuti": 0, "silenzio": zitto, "errore": None}
 
         if zitto:
-            log.info("ore di silenzio: %d avvisi rimandati alla panoramica", len(voci))
-            return {"inviati": 0, "trattenuti": len(voci), "silenzio": True,
-                    "errore": None}
+            passa = [v for v in voci
+                     if str(v.get("tipo", "")).lower() in self.silenzio.passano]
+            fermi = len(voci) - len(passa)
+            if fermi:
+                log.info("ore di silenzio: %d avvisi non inviati, restano sul "
+                         "dashboard", fermi)
+            inviati = 0
+            for v in passa:
+                if self.tg.manda(componi(v, self.silenzio.fuso)):
+                    inviati += 1
+            if passa:
+                log.info("ore di silenzio: %d di %d passati come fonte primaria",
+                         inviati, len(passa))
+            return {"inviati": inviati, "trattenuti": fermi, "silenzio": True,
+                    "errore": (self.tg.ultimo_errore
+                               if (passa and not inviati) else None)}
 
         inviati = 0
         for v in voci:
@@ -316,6 +340,35 @@ if __name__ == "__main__":
     ok = "&lt;b&gt;" in testo and "&amp;" in testo
     esiti.append(ok)
     print(f"  {'ok ' if ok else 'NO '} HTML nel titolo neutralizzato")
+
+    # La soglia notturna: passano le banche centrali, il resto no.
+    class _FintoTg:
+        def __init__(self): self.mandati = []
+        configurato = True
+        ultimo_errore = None
+        def manda(self, testo, silenzioso=False):
+            self.mandati.append(testo); return True
+
+    notte = datetime(2026, 8, 14, 3, 0, tzinfo=fuso)
+    giorno = datetime(2026, 8, 14, 15, 0, tzinfo=fuso)
+    lotto = [
+        {"tipo": "ufficiale", "titolo": "Monetary policy decisions",
+         "fonte": "BCE", "quando": "", "motivi": [], "dati": {}},
+        {"tipo": "evento", "titolo": "CPI", "fonte": "Nasdaq",
+         "quando": "", "motivi": [], "dati": {}},
+        {"tipo": "notizia", "titolo": "Nvidia halts shipments",
+         "fonte": "CNBC", "quando": "", "motivi": [], "dati": {}},
+    ]
+    for nome, quando, att_inviati, att_fermi in (
+            ("di notte passa solo la banca centrale", notte, 1, 2),
+            ("di giorno passano tutti", giorno, 3, 0)):
+        c = Consegna({"avvisi": {"silenzio": {"da": "23:00", "a": "07:00"}}})
+        c.tg = _FintoTg()
+        r = c.avvisi(list(lotto), quando=quando)
+        ok = r["inviati"] == att_inviati and r["trattenuti"] == att_fermi
+        esiti.append(ok)
+        print(f"  {'ok ' if ok else 'NO '} {nome}: inviati={r['inviati']} "
+              f"non inviati={r['trattenuti']}")
 
     print(f"\n{sum(esiti)}/{len(esiti)} controlli superati")
     raise SystemExit(0 if all(esiti) else 1)

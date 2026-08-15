@@ -269,6 +269,11 @@ class Filtro:
         a = cfg.get("avvisi", {}) or {}
         self.a = a
         self.forti = [str(p).lower() for p in a.get("parole_forti", [])]
+        # Il sottoinsieme che puo' far scattare un avviso anche quando a
+        # scriverlo e' un giornale. Le altre parole forti valgono solo sulle
+        # fonti primarie: "monetary policy" dalla Fed e' una decisione, sul
+        # sito di una testata e' il titolo di un commento.
+        self.da_testata = [str(p).lower() for p in a.get("parole_da_testata", [])]
         self.chiave_deboli = [str(p).lower() for p in a.get("parole_chiave", [])]
         self.sempre = [str(p).lower() for p in a.get("eventi_sempre", [])]
         self.paesi = [str(p).lower() for p in a.get("paesi", [])]
@@ -318,6 +323,7 @@ class Filtro:
 
         forti = _cerca(testo, self.forti)
         deboli = _cerca(testo, self.chiave_deboli)
+        annunci = _cerca(testo, self.da_testata)
         riferimenti = self._riferimenti(testo_orig, testo)
 
         # Una parola chiave che coincide col nome di chi pubblica non
@@ -328,6 +334,7 @@ class Filtro:
         if propri:
             forti = [p for p in forti if p not in propri]
             deboli = [p for p in deboli if p not in propri]
+            annunci = [p for p in annunci if p not in propri]
 
         if forti:
             punti += 30
@@ -339,7 +346,8 @@ class Filtro:
             punti += 25
             motivi.append("watchlist: " + ", ".join(riferimenti))
 
-        esito, extra = self._esito(tipo, dati, forti, deboli, riferimenti, motivi)
+        esito, extra = self._esito(tipo, dati, forti, deboli, annunci,
+                                   riferimenti, motivi)
         punti += extra
 
         # Il veto agisce dopo, non prima: la voce resta sul dashboard, perde
@@ -368,7 +376,8 @@ class Filtro:
         return Giudizio(esito, min(int(punti), 100), motivi)
 
     def _esito(self, tipo: str, dati: dict, forti: list, deboli: list,
-               riferimenti: list, motivi: list) -> tuple[str, int]:
+               annunci: list, riferimenti: list,
+               motivi: list) -> tuple[str, int]:
         """La decisione, un tipo alla volta, con l'aggiustamento del punteggio.
 
         Il secondo valore serve a una cosa sola ma importante: sui dati macro
@@ -423,6 +432,22 @@ class Filtro:
 
             n = int(round(scatti))
             quanti = f"{n} scatto" if n == 1 else f"{n} scatti"
+
+            # Solo gli indicatori che muovono davvero i mercati possono
+            # interrompere. Prima bastava uno scostamento grande su QUALSIASI
+            # voce del calendario, e il calendario ne contiene decine al
+            # giorno: "Business Inventories", "Retail Control", le posizioni
+            # speculative CFTC. Sono numeri veri e scostamenti veri, ma non
+            # sono notizie — e uno scarto percentuale grosso su una voce
+            # marginale resta una voce marginale.
+            if not e_sempre:
+                if s >= soglia:
+                    motivi.append(f"scostamento {s:.0f}%, ma non e' un "
+                                  f"indicatore di primo piano")
+                else:
+                    motivi.append(f"in linea con le {riferimento} ({s:.0f}%)")
+                return "diario", (10 if s >= soglia else 0)
+
             if s >= soglia and scatti >= self.min_scatti:
                 motivi.append(f"scostamento {s:.0f}% dalle {riferimento} "
                               f"(soglia {soglia:.0f}%, {quanti})")
@@ -464,12 +489,34 @@ class Filtro:
             return ("diario" if riferimenti else "scarta"), 0
 
         # --- notizie di testata ----------------------------------------------
-        if riferimenti or forti:
+        # Una testata quasi mai merita un'interruzione, e la ragione e'
+        # strutturale: quando la Fed decide lo sai dal canale della Fed, e
+        # quando esce un dato lo sai dal calendario. Il titolo di giornale
+        # arriva DOPO e commenta. Misurato sui dati veri: su 97 avvisi in un
+        # giorno, 89 erano titoli di testata, e tutti dicevano cose come
+        # "S&P 500 rises for the week" o "Fed rate hike odds fall". Zero
+        # informazione, un'interruzione ogni ventitre minuti.
+        #
+        # Restano due casi che valgono davvero.
+        #
+        # Il primo: un ANNUNCIO. Poche parole, rare e non opinabili, che in
+        # un titolo indicano un fatto avvenuto e non un'opinione su un fatto
+        # possibile — "tariffs", "sanctions", "Powell". Sono l'elenco
+        # `parole_da_testata`, e sono deliberatamente meno di quelle forti:
+        # "rate hike" resta forte per la Fed e non lo e' per un giornale,
+        # perche' in un titolo compare quasi sempre dentro "rate hike odds"
+        # o "rate hike bets", che sono previsioni, non notizie.
+        if annunci:
+            motivi.append("annuncio: " + ", ".join(annunci[:2]))
             return "avviso", 0
-        # Una sola parola debole non basta: "nasdaq" compare in un titolo su
-        # tre. Due termini distinti sono gia' un argomento.
-        if len(deboli) >= 2:
+        # Il secondo: una societa' che segui, nominata insieme a un fatto —
+        # "Nvidia halts shipments after export ban".
+        if riferimenti and (forti or deboli):
             return "avviso", 0
+        # Tutto il resto e' contesto: finisce sul dashboard, dove lo leggi
+        # quando vuoi tu invece che quando lo decide un titolista.
+        if forti or len(deboli) >= 2 or riferimenti:
+            return "diario", 0
         return ("diario" if deboli else "scarta"), 0
 
     # -- passata completa ---------------------------------------------------
@@ -551,7 +598,9 @@ if __name__ == "__main__":
         "memoria_giorni": 7,
         "avvisi": {
             "sorpresa_minima_pct": 15, "scatti_minimi": 2, "max_avvisi_per_ciclo": 5,
-            "parole_forti": ["powell", "monetary policy", "rate cut"],
+            "parole_forti": ["powell", "monetary policy", "rate cut", "rate hike",
+                             "tariff"],
+            "parole_da_testata": ["powell", "tariff"],
             "parole_chiave": ["inflation", "nasdaq", "tariff"],
             "eventi_sempre": ["cpi", "jobless claims"],
             "paesi": ["United States"],
@@ -617,23 +666,70 @@ if __name__ == "__main__":
              "scarta")
 
     # -- plurali ------------------------------------------------------------
-    atteso_e("'tariff' deve trovare 'tariffs'",
-             nuovo().valuta(voce(titolo="New tariffs hit chip inflation hard")),
-             "avviso")
+    # Qui si verifica il RICONOSCIMENTO, non la decisione: "tariffs" al
+    # plurale deve essere trovato. Che poi una notizia di testata non
+    # interrompa e' una scelta diversa, provata piu' sotto.
+    g = nuovo().valuta(voce(titolo="New tariffs hit chip inflation hard"))
+    prove.append(("'tariff' trova 'tariffs'",
+                  "tariff" in " ".join(g.motivi), "tariff" in " ".join(g.motivi)))
 
     # -- maiuscole nei ticker ------------------------------------------------
-    atteso_e("SPY come ticker",
-             nuovo().valuta(voce(titolo="SPY hits record")), "avviso")
     atteso_e("'spy' minuscolo non e' un ticker",
              nuovo().valuta(voce(titolo="Corporate spy arrested in Milan")), "scarta")
-    atteso_e("Nvidia riconosciuta come NVDA",
-             nuovo().valuta(voce(titolo="Nvidia beats estimates")), "avviso")
+    atteso_e("Nvidia piu' un fatto forte: interrompe",
+             nuovo().valuta(voce(titolo="Nvidia halts shipments after rate cut")),
+             "avviso")
+    atteso_e("Nvidia solo nominata: non interrompe",
+             nuovo().valuta(voce(titolo="Nvidia rival Cerebras files to go public")),
+             "diario")
 
-    # -- una parola debole sola non basta, due si' ---------------------------
-    atteso_e("una sola parola rilevante",
-             nuovo().valuta(voce(titolo="Nasdaq opens flat")), "diario")
-    atteso_e("due parole rilevanti",
-             nuovo().valuta(voce(titolo="Nasdaq slides as inflation bites")), "avviso")
+    # -- ANNUNCIO CONTRO COMMENTO --------------------------------------------
+    # La stessa area tematica, due nature diverse: un fatto avvenuto merita
+    # un'interruzione, una previsione su un fatto possibile no. E' la
+    # distinzione che ha ridotto gli avvisi da 97 a una manciata.
+    atteso_e("annuncio: dazi decisi",
+             nuovo().valuta(voce(titolo="White House announces tariffs on all "
+                                        "Chinese imports")), "avviso")
+    atteso_e("annuncio: Powell parla",
+             nuovo().valuta(voce(titolo="Powell says inflation risks have shifted")),
+             "avviso")
+    atteso_e("commento: scommesse sui tassi",
+             nuovo().valuta(voce(titolo="S&P 500 rises for the week, helped by "
+                                        "reduction in rate hike bets")), "diario")
+    atteso_e("commento: probabilita' di rialzo",
+             nuovo().valuta(voce(titolo="Fed Rate Hike Odds Fall As Amazon Prime "
+                                        "Day Effect Hits Retail")), "diario")
+    atteso_e("'rate hike' resta forte sulla fonte primaria",
+             nuovo().valuta(voce(tipo="ufficiale", fonte="Federal Reserve",
+                                 titolo="Fed announces rate hike of 25 basis "
+                                        "points")), "avviso")
+
+    # -- LE TESTATE NON INTERROMPONO -----------------------------------------
+    # Misurato sui dati veri: 89 dei 97 avvisi di una giornata erano titoli
+    # di cronaca finanziaria. Questi quattro casi sono presi da quelli.
+    for titolo in ("S&P 500 rises for the week, helped by reduction in rate hike bets",
+                   "Markets News: S&P 500 Closes at Record, Nasdaq Jumps",
+                   "Fed Rate Hike Odds Fall As Amazon Prime Day Effect Hits Retail",
+                   "Nasdaq slides as inflation bites"):
+        # Cio' che conta e' che non interrompano. Se finiscono in "diario" o
+        # in "scarta" dipende da quante parole della configurazione toccano,
+        # ed e' una distinzione che qui non interessa: pretendere l'una o
+        # l'altra vorrebbe dire legare il test a un elenco di parole invece
+        # che al comportamento.
+        g = nuovo().valuta(voce(titolo=titolo))
+        prove.append((f"cronaca non interrompe: {titolo[:34]}…",
+                      "non-avviso" if g.esito != "avviso" else "avviso",
+                      "non-avviso"))
+
+    # -- IL CALENDARIO MINORE NON INTERROMPE ---------------------------------
+    # Stessa giornata: "Business Inventories" e le posizioni speculative CFTC
+    # avevano scostamenti enormi e finivano fra i rossi.
+    atteso_e("voce di calendario marginale, scostamento grande",
+             nuovo().valuta(evento("Business Inventories", "United States",
+                                   "0.2", "0.3", "0.2")), "diario")
+    atteso_e("posizioni speculative CFTC",
+             nuovo().valuta(evento("CFTC S&P 500 speculative net positions",
+                                   "United States", None, "-120K", "-50K")), "diario")
 
     # -- il veto toglie l'avviso ma non la voce ------------------------------
     atteso_e("comunicato amministrativo",

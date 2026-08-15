@@ -158,6 +158,27 @@ avvisi:
     - "sanctions"
     - "export ban"
 
+  # IL SOTTOINSIEME CHE VALE ANCHE SU UN GIORNALE.
+  #
+  # Le parole qui sopra bastano a far scattare un avviso quando arrivano da
+  # una fonte primaria — la Fed che scrive "monetary policy" sta decidendo.
+  # Da una testata la stessa parola e' quasi sempre un commento: misurato
+  # sul campo, "rate hike" ha prodotto 23 avvisi in un giorno, tutti dentro
+  # frasi come "rate hike odds fall" o "reduction in rate hike bets", cioe'
+  # previsioni su un fatto che non e' successo.
+  #
+  # Queste invece, in un titolo, indicano un fatto avvenuto. Sono poche di
+  # proposito: ogni aggiunta e' un potenziale ritorno del rumore.
+  parole_da_testata:
+    - "powell"
+    - "lagarde"
+    - "fomc"
+    - "emergency meeting"
+    - "circuit breaker"
+    - "tariff"
+    - "sanctions"
+    - "export ban"
+
   # RILEVANTI: da sole non bastano. "nasdaq" compare in un titolo su tre e
   # "fed" in mezzo giornale: se una parola qui dentro innescasse un avviso,
   # il telefono suonerebbe tutto il giorno. Ne servono due distinte.
@@ -181,10 +202,17 @@ avvisi:
   # I ticker si cercano rispettando le maiuscole — "SPY" e' un fondo, "spy"
   # e' una spia — ma nessun giornalista scrive "NVDA" nel titolo: scrive
   # "Nvidia". Qui si dice a che nomi corrisponde ogni simbolo.
+  # Solo NOMI DI SOCIETA'. Gli alias degli indici sono stati tolti dopo la
+  # prima giornata di funzionamento vero: "SPY -> s&p 500" faceva scattare
+  # la watchlist su ogni cronaca di borsa, perche' "S&P 500" e' la locuzione
+  # piu' comune del giornalismo finanziario. Da sola ha prodotto 63 avvisi
+  # in ventiquattr'ore, nessuno dei quali diceva qualcosa sulle posizioni.
+  #
+  # I ticker SPY e QQQ restano nella watchlist: si cercano in maiuscolo, e
+  # in quella forma nei titoli non compaiono quasi mai. E' il nome esteso a
+  # essere rumore, non il simbolo.
   alias:
     NVDA: ["nvidia"]
-    SPY: ["s&p 500", "sp 500", "standard & poor"]
-    QQQ: ["nasdaq 100"]
 
   # Parole che, sul canale di chi le pubblica, non distinguono nulla: ogni
   # comunicato della BCE contiene "ECB", compreso l'invito al concerto
@@ -228,6 +256,18 @@ avvisi:
     da: "23:00"
     a: "07:00"
     fuso: "Europe/Rome"
+
+    # Di notte non vale un divieto ma una soglia piu' alta: passano solo le
+    # fonti primarie delle banche centrali, dove la pubblicazione stessa e'
+    # la decisione. Quelle suonano davvero — se ti svegliano deve valerne la
+    # pena. Tutto il resto non viene inviato mai: resta sul dashboard in
+    # rosso, con scritto "non inviato: ore di silenzio", e viene raccontato
+    # nel riassunto delle 07:30.
+    #
+    # Per far passare anche i dati macro di prima grandezza, aggiungi
+    # "evento" all'elenco. Attenzione: il calendario asiatico pubblica in
+    # piena notte europea.
+    passano_di_notte: ["ufficiale"]
 
   # Tetto rigido di interruzioni per ciclo (un ciclo = 10 minuti). Gli avvisi
   # in eccesso non spariscono: scendono sul dashboard. Serve a limitare il
@@ -280,7 +320,12 @@ dashboard:
 # nient'altro.
 # ---------------------------------------------------------------------
 pubblicazione:
-  attiva: false                 # si accende quando il NAS avra' il suo token
+  # ATTENZIONE: questo file e' la fonte, non una copia. Gli script di
+  # aggiornamento lo incorporano cosi' com'e': se qui resta "false", la
+  # pubblicazione viene spenta sul NAS al primo aggiornamento, in silenzio
+  # e senza errori — perche' spegnerla di proposito e' legittimo, e il
+  # programma non puo' distinguere la scelta dalla dimenticanza.
+  attiva: true
   repo: "liguoriedo-cmd/news-radar"
   ramo: "main"
   cartella_remota: "docs"       # GitHub Pages e' configurato per servire /docs

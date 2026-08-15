@@ -132,9 +132,18 @@ class Radar:
         alert, diario, stat = self.filtro.passa(voci)
 
         esito = self.consegna.avvisi(alert)
-        if esito["silenzio"]:
-            # Non spariscono: vengono marcati e la mattina escono per primi.
-            alert = [dict(v, trattenuto=True) for v in alert]
+        if esito["silenzio"] and esito["trattenuti"]:
+            # Non inviati per l'ora, e non lo saranno piu': restano qui, in
+            # rosso, con scritto perche'. Il motivo va nella voce e non solo
+            # nei registri — aprendo il dashboard alle otto del mattino, la
+            # domanda e' "perche' non mi e' arrivato?", e la risposta deve
+            # stare accanto alla notizia.
+            passa = self.consegna.silenzio.passano
+            alert = [v if str(v.get("tipo", "")).lower() in passa
+                     else dict(v, trattenuto=True,
+                               motivi=list(v.get("motivi") or [])
+                               + ["non inviato: ore di silenzio"])
+                     for v in alert]
 
         self._archivia(alert + diario)
         self._riepilogo_iniziale()
@@ -274,18 +283,13 @@ class Radar:
     def panoramica(self) -> bool:
         recenti = self.archivio(ore=24)
 
-        # 1) Prima gli avvisi trattenuti nella notte, grezzi come sarebbero
-        #    arrivati sul momento. Il riassunto viene dopo: su un dato che
-        #    muove i prezzi la parafrasi non e' un miglioramento.
-        notturni = [v for v in recenti if v.get("trattenuto")]
-        if notturni:
-            notturni.sort(key=lambda v: -int(v.get("punteggio", 0)))
-            testa = f"<b>ARRIVATI NELLA NOTTE ({len(notturni)})</b>"
-            corpo = "\n\n".join(A.componi(v, self.consegna.silenzio.fuso)
-                                for v in notturni[:8])
-            self.consegna.panoramica(f"{testa}\n\n{corpo}")
+        # Niente consegna di arretrati. Cio' che di notte non ha superato la
+        # soglia notturna non viene inviato mai: e' gia' sul dashboard, con
+        # la sua ora vera, e il riassunto qui sotto lo racconta. Mandare alle
+        # 07:30 una raffica di notifiche su fatti di sei ore prima e' rumore
+        # che si traveste da tempestivita'.
 
-        # 2) Poi la panoramica vera e propria. E' l'UNICA chiamata al modello
+        # La panoramica e' l'UNICA chiamata al modello
         #    della giornata: lo stesso testo va su Telegram e in cima al
         #    dashboard, perche' e' la stessa cosa e pagarla due volte sarebbe
         #    solo un modo elegante di sprecare.
@@ -295,12 +299,9 @@ class Radar:
                                   resoconto)
         ok = self.consegna.panoramica(testo)
 
-        # Gli avvisi notturni sono stati consegnati: si toglie il segno, cosi'
-        # domani mattina non ricompaiono.
-        tutte = self._leggi(self.archivio_path, [])
-        for v in tutte:
-            v.pop("trattenuto", None)
-        self._scrivi(self.archivio_path, tutte)
+        # Il segno "non inviato" NON si toglie: non era un promemoria di una
+        # consegna da fare, e' il resoconto di cio' che quella notte non ti e'
+        # arrivato. Cancellarlo riscriverebbe la storia della pagina.
 
         stato = self._leggi(self.stato_path, {})
         stato["ultima_panoramica"] = datetime.now(timezone.utc).isoformat()

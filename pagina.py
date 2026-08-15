@@ -55,6 +55,15 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V1.3 14/08/2026  la classificazione era tarata male: 97 avvisi in un
+#                    giorno, 89 dei quali titoli di cronaca finanziaria.
+#                    Causa: l'alias "SPY -> s&p 500" faceva scattare la
+#                    watchlist su ogni articolo di borsa, e bastava un solo
+#                    segnale per interrompere. Ora una testata interrompe
+#                    solo nominando una societa' seguita insieme a un fatto,
+#                    e nel calendario solo gli indicatori di primo piano.
+#                    Di notte passano solo le banche centrali, e gli arretrati
+#                    non vengono piu' riversati alle 07:30.
 #   V1.2 14/08/2026  segnalatore di stato in cima: la freschezza della
 #                    pagina la misura il browser, non il generatore, cosi'
 #                    una pagina ferma riesce a dichiararsi ferma. Stato dei
@@ -66,7 +75,7 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V1.2"
+VERSIONE = "V1.3"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
