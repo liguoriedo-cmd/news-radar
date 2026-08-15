@@ -63,6 +63,12 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V1.5 15/08/2026  la pagina si aggiorna da sola. Essendo statica restava
+#                    ferma una volta caricata: ora ogni 90 secondi chiede al
+#                    server l'impronta del file (HEAD + ETag, poche decine di
+#                    byte invece di 50 KB) e si ricarica se e' cambiata. Se
+#                    stai leggendo a meta' pagina non ti strappa la lettura:
+#                    compare un avviso da toccare.
 #   V1.4 15/08/2026  tolto il livello intermedio. Il confine cadeva a un
 #                    punteggio fisso, ma il punteggio parte dal peso del
 #                    TIPO di fonte: separava le fonti, non l'importanza.
@@ -89,7 +95,7 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V1.4"
+VERSIONE = "V1.5"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
@@ -204,6 +210,11 @@ h2 em{font-style:normal;font-size:11px;text-transform:none;letter-spacing:0;
 .f button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 .f button.on i{opacity:.85}
 .vuoto{color:var(--gr);font-style:italic;padding:10px 0;font-size:13.5px}
+.aggiorna{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;
+          background:var(--ac);color:#fff;border:none;border-radius:20px;
+          padding:11px 18px;font:600 13px/1 inherit;cursor:pointer;
+          box-shadow:0 6px 20px rgba(0,0,0,.45);z-index:9}
+.aggiorna:active{transform:translateX(-50%) scale(.97)}
 footer{color:var(--gr);font-size:11.5px;margin-top:34px;border-top:1px solid var(--bo);
        padding-top:13px;line-height:1.6}
 """
@@ -249,6 +260,74 @@ SCRIPT = """
   setInterval(aggiorna, 30000);
 })();
 
+/* AGGIORNAMENTO AUTOMATICO
+   Una pagina statica, una volta caricata, resta ferma per sempre: il NAS ne
+   pubblica una nuova ogni pochi minuti e il browser continua a mostrare
+   quella vecchia. Qui la pagina si controlla da sola.
+
+   Si usa una richiesta HEAD e si confronta l'ETag, cioe' l'impronta che il
+   server associa al file: sono poche decine di byte a giro, contro i ~50 KB
+   che costerebbe riscaricare tutta la pagina per accorgersi che non e'
+   cambiata. Se l'ETag non fosse disponibile si ripiega sulla data di
+   ultima modifica.
+
+   Il ricaricamento non e' mai brusco: se stai leggendo a meta' pagina
+   compare un avviso da toccare, invece di strapparti la lettura. */
+(function(){
+  var iniziale = null, avvisato = false;
+
+  function impronta(r){
+    return r.headers.get('etag') || r.headers.get('last-modified') || null;
+  }
+
+  function mostraAvviso(){
+    if (avvisato) return;
+    avvisato = true;
+    var b = document.createElement('button');
+    b.className = 'aggiorna';
+    b.textContent = '↻ Nuovi dati disponibili — tocca per aggiornare';
+    b.onclick = function(){ location.reload(); };
+    document.body.appendChild(b);
+  }
+
+  function controlla(){
+    fetch(location.pathname + '?_=' + Date.now(), {method:'HEAD', cache:'no-store'})
+      .then(function(r){
+        var ora = impronta(r);
+        if (!ora) return;
+        if (iniziale === null) { iniziale = ora; return; }
+        if (ora === iniziale) return;
+        /* Se la pagina non e' sotto gli occhi di nessuno, o se sei in cima
+           e quindi non stai leggendo un punto preciso, si ricarica e basta. */
+        if (document.hidden || window.scrollY < 300) {
+          /* Freno contro il ricaricamento a ripetizione. GitHub Pages
+             dichiara max-age=600: se dopo il ricaricamento la rete servisse
+             ancora la copia vecchia, la pagina troverebbe di nuovo l'ETag
+             diverso e ripartirebbe, all'infinito. Un giro al minuto al
+             massimo: se il contenuto nuovo non arriva, resta l'avviso da
+             toccare. */
+          var ultimo = 0;
+          try { ultimo = parseInt(sessionStorage.getItem('radar-ricarica')||'0',10); }
+          catch(e){}
+          if (Date.now() - ultimo < 60000) { mostraAvviso(); return; }
+          try { sessionStorage.setItem('radar-ricarica', String(Date.now())); }
+          catch(e){}
+          location.reload();
+        } else {
+          mostraAvviso();
+        }
+      })
+      .catch(function(){ /* rete assente: si riprova al giro dopo */ });
+  }
+
+  controlla();
+  setInterval(controlla, 90000);
+  /* Tornando sulla scheda dopo un po', il controllo e' subito. */
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) controlla();
+  });
+})();
+
 document.querySelectorAll('.f button').forEach(b=>{
   b.onclick=()=>{
     const q=b.dataset.q;
@@ -259,8 +338,21 @@ document.querySelectorAll('.f button').forEach(b=>{
       v.style.display=ok?'':'none'; if(ok)n++;
     });
     document.getElementById('nessuno').style.display=n?'none':'';
+    try{ sessionStorage.setItem('radar-filtro', q); }catch(e){}
   };
 });
+
+/* Il filtro scelto sopravvive al ricaricamento automatico: senza, ogni
+   aggiornamento ti riporterebbe a "tutto" mentre stavi guardando i dati
+   macro. Va DOPO il ciclo qui sopra: prima che i gestori siano agganciati,
+   un click() non farebbe niente. */
+(function(){
+  var salvato = null;
+  try{ salvato = sessionStorage.getItem('radar-filtro'); }catch(e){}
+  if (!salvato || salvato === '*') return;
+  var b = document.querySelector('.f button[data-q="' + salvato + '"]');
+  if (b) b.click();
+})();
 """
 
 
@@ -585,6 +677,22 @@ if __name__ == "__main__":
          "&lt;b&gt;ostile&lt;/b&gt;" in r),
         ("il guasto di Telegram spiega che il radar continua",
          "si e' rotto solo il canale" in r or "solo il canale" in r),
+    ]
+
+    # 4) Aggiornamento automatico: i pezzi che lo reggono devono esserci.
+    prove += [
+        ("la pagina si ricontrolla da sola", "setInterval(controlla, 90000)" in s),
+        ("usa HEAD, non riscarica tutto", "method:'HEAD'" in s),
+        ("aggira la cache con un parametro", "'?_=' + Date.now()" in s),
+        ("confronta ETag, con ripiego su last-modified",
+         "headers.get('etag')" in s and "last-modified" in s),
+        ("non ricarica se stai leggendo a meta' pagina",
+         "window.scrollY < 300" in s and "mostraAvviso" in s),
+        ("freno contro il ricaricamento a ripetizione",
+         "radar-ricarica" in s and "60000" in s),
+        ("ricontrolla tornando sulla scheda", "visibilitychange" in s),
+        ("il filtro scelto sopravvive al ricaricamento",
+         "radar-filtro" in s),
     ]
 
     for nome, ok in prove:
