@@ -296,10 +296,8 @@ panoramica:
 # DASHBOARD
 # ---------------------------------------------------------------------
 dashboard:
-  # Sotto questo punteggio una voce e' "bassa importanza": contesto, non
-  # segnale. Gli avvisi sono sempre "alta" a prescindere dal punteggio,
-  # perche' hanno gia' superato una soglia pensata per l'interruzione.
-  soglia_media: 55
+  # Il livello intermedio e' stato tolto in V1.4: restava una soglia su un
+  # punteggio che misura il tipo di fonte, non l'importanza. Due livelli.
 
   # Dopo quanti minuti dalla generazione la pagina va considerata "in
   # ritardo". Il giro veloce e' ogni 3 minuti e il battito ripubblica ogni

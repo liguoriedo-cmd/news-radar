@@ -16,19 +16,27 @@ gia' dentro. La scelta ha tre conseguenze pratiche, tutte volute:
     rete, e nessuno puo' cambiare cio' che vedi modificando una risorsa
     altrove.
 
-I TRE LIVELLI DI IMPORTANZA
----------------------------
-Rosso, giallo e verde non vengono dal punteggio grezzo, e la ragione conta.
-Il punteggio serve a mettere in fila voci dello stesso genere, ma un 60 su
-una notizia e un 60 su un dato macro non vogliono dire la stessa cosa. Il
-livello viene invece dalla DECISIONE del filtro, che e' l'unica cosa con un
-significato univoco:
+DUE LIVELLI, NON TRE
+--------------------
+  rosso   ha superato la soglia dell'interruzione: se non fosse notte ti
+          sarebbe arrivato addosso.
+  verde   tutto il resto.
 
-  rosso   ha superato la soglia dell'interruzione: se non fosse notte, o se
-          non ci fosse stato il tetto per ciclo, ti sarebbe arrivato addosso.
-  giallo  non meritava di interromperti ma ha un segnale forte: e' la roba
-          che vuoi scorrere quando apri la pagina.
-  verde   contesto. Serve a capire il quadro, non a reagire.
+Il livello viene dalla DECISIONE del filtro, non dal punteggio, ed e'
+l'unica cosa con un significato univoco: un 60 su una notizia e un 60 su un
+dato macro non vogliono dire la stessa cosa.
+
+C'era un terzo livello intermedio ed e' stato tolto dopo averlo misurato.
+Il confine cadeva a un punteggio fisso, ma il punteggio parte dal peso del
+TIPO di fonte — 35 per un dato di calendario, 20 per una notizia — quindi
+finiva per separare le fonti invece dell'importanza. In un campione vero,
+"CFTC S&P 500 speculative net positions" stava in giallo a 55 e "Trump's
+new global tariff draws rebukes from trade partners" in verde a 50: il
+contrario di quello che un lettore si aspetta. Un livello che ordina al
+rovescio e' peggio di un livello in meno.
+
+Il punteggio resta e continua a ordinare le voci dentro ciascun livello:
+li' fa il suo mestiere, perche' confronta cose omogenee.
 
 I contenuti mostrati arrivano da fonti pubbliche e sono DATI: ogni testo
 passa da `_e()` prima di finire nell'HTML. Un titolo che contiene "<script>"
@@ -55,6 +63,12 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V1.4 15/08/2026  tolto il livello intermedio. Il confine cadeva a un
+#                    punteggio fisso, ma il punteggio parte dal peso del
+#                    TIPO di fonte: separava le fonti, non l'importanza.
+#                    Misurato: "CFTC S&P 500 speculative net positions" in
+#                    giallo a 55, "Trump's new global tariff draws rebukes"
+#                    in verde a 50. Restano due livelli: urgente e il resto.
 #   V1.3 14/08/2026  la classificazione era tarata male: 97 avvisi in un
 #                    giorno, 89 dei quali titoli di cronaca finanziaria.
 #                    Causa: l'alias "SPY -> s&p 500" faceva scattare la
@@ -75,7 +89,7 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V1.3"
+VERSIONE = "V1.4"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
@@ -85,16 +99,15 @@ SIMBOLO = {"evento": "📊", "ufficiale": "🏛", "deposito": "📄",
            "notizia": "📰", "trimestrale": "💵", "forum": "💬"}
 
 LIVELLI = {
-    "alta": ("Alta", "Meritava di interromperti"),
-    "media": ("Media", "Segnale forte, ma non urgente"),
-    "bassa": ("Bassa", "Contesto"),
+    "alta": ("Urgenti", "Meritavano di interromperti"),
+    "resto": ("Il resto", "Contesto, da scorrere quando vuoi"),
 }
 
 STILE = """
 :root{
   --sf:#0f1115; --ca:#171a21; --ca2:#1c2029; --bo:#252a34;
   --te:#e6e9ef; --gr:#8b93a7; --ac:#5b9dff;
-  --alta:#ff5c4d; --media:#f5c542; --bassa:#4ade80;
+  --alta:#ff5c4d; --resto:#4ade80; --tarda:#f5c542;
 }
 *{box-sizing:border-box}
 body{margin:0;padding:16px 14px 40px;background:var(--sf);color:var(--te);
@@ -112,12 +125,10 @@ h1{font-size:20px;margin:0 0 3px;letter-spacing:-.2px}
 .conta div{background:var(--ca);border:1px solid var(--bo);border-radius:11px;
            padding:9px 6px;flex:1 1 0;text-align:center;border-top:2px solid var(--bo)}
 .conta div.alta{border-top-color:var(--alta)}
-.conta div.media{border-top-color:var(--media)}
-.conta div.bassa{border-top-color:var(--bassa)}
+.conta div.resto{border-top-color:var(--resto)}
 .conta b{display:block;font-size:21px;line-height:1.2}
 .conta div.alta b{color:var(--alta)}
-.conta div.media b{color:var(--media)}
-.conta div.bassa b{color:var(--bassa)}
+.conta div.resto b{color:var(--resto)}
 .conta span{color:var(--gr);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px}
 
 h2{font-size:12.5px;text-transform:uppercase;letter-spacing:1.1px;color:var(--gr);
@@ -132,22 +143,22 @@ h2 em{font-style:normal;font-size:11px;text-transform:none;letter-spacing:0;
        padding:11px 14px;margin-bottom:18px;font-size:13px}
 .stato .spia{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
              background:var(--gr);box-shadow:0 0 0 3px transparent}
-.stato.viva .spia{background:var(--bassa);box-shadow:0 0 0 3px rgba(74,222,128,.15);
+.stato.viva .spia{background:var(--resto);box-shadow:0 0 0 3px rgba(74,222,128,.15);
                   animation:battito 2.6s ease-in-out infinite}
-.stato.tarda .spia{background:var(--media);box-shadow:0 0 0 3px rgba(245,197,66,.15)}
+.stato.tarda .spia{background:var(--tarda);box-shadow:0 0 0 3px rgba(245,197,66,.15)}
 .stato.ferma .spia{background:var(--alta);box-shadow:0 0 0 3px rgba(255,92,77,.15)}
 @keyframes battito{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.stato.viva .spia{animation:none}}
 .stato .titolo{font-weight:640;letter-spacing:.01em}
-.stato.viva .titolo{color:var(--bassa)}
-.stato.tarda .titolo{color:var(--media)}
+.stato.viva .titolo{color:var(--resto)}
+.stato.tarda .titolo{color:var(--tarda)}
 .stato.ferma .titolo{color:var(--alta)}
 .stato .eta{color:var(--gr);font-variant-numeric:tabular-nums}
 .stato .canali{margin-left:auto;display:flex;gap:12px;flex-wrap:wrap;
                color:var(--gr);font-size:12px}
 .stato .canali b{font-weight:600}
 .stato .canali .ko{color:var(--alta)}
-.stato .canali .ok{color:var(--bassa)}
+.stato .canali .ok{color:var(--resto)}
 .guasto{background:rgba(255,92,77,.09);border:1px solid var(--alta);
         border-radius:10px;padding:11px 14px;margin-bottom:18px;font-size:13.5px}
 .guasto b{color:var(--alta)}
@@ -165,14 +176,12 @@ h2 em{font-style:normal;font-size:11px;text-transform:none;letter-spacing:0;
    padding:11px 13px 11px 15px;margin-bottom:8px;position:relative;overflow:hidden}
 .v::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
 .v.alta::before{background:var(--alta)}
-.v.media::before{background:var(--media)}
-.v.bassa::before{background:var(--bassa)}
+.v.resto::before{background:var(--resto)}
 .cap{display:flex;align-items:center;gap:7px;margin-bottom:6px;
      font-size:10.5px;text-transform:uppercase;letter-spacing:.55px;color:var(--gr)}
 .cap .punto{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .v.alta .cap .punto{background:var(--alta)}
-.v.media .cap .punto{background:var(--media)}
-.v.bassa .cap .punto{background:var(--bassa)}
+.v.resto .cap .punto{background:var(--resto)}
 .cap .quando{margin-left:auto;text-transform:none;letter-spacing:0;
              font-variant-numeric:tabular-nums;white-space:nowrap}
 .t{font-weight:600;font-size:14.5px;line-height:1.4;overflow-wrap:anywhere}
@@ -259,17 +268,21 @@ def _e(t) -> str:
     return html.escape(str(t if t is not None else ""), quote=True)
 
 
-def livello(voce: dict, soglia_media: int = 55) -> str:
-    """Alta, media o bassa. Dalla decisione del filtro, non dal punteggio.
+def livello(voce: dict, _soglia_non_usata: int = 0) -> str:
+    """Urgente o no. Dalla decisione del filtro, mai dal punteggio.
 
-    Un avviso e' sempre alto: ha gia' superato una soglia pensata per
-    l'interruzione, e retrocederlo qui vorrebbe dire avere due opinioni
-    diverse sullo stesso fatto. Fra le voci che non interrompono, il
-    punteggio distingue quelle con un segnale forte dal contesto.
+    Due soli valori, di proposito. Un avviso e' urgente perche' ha superato
+    una soglia pensata per l'interruzione; tutto il resto e' contesto. Un
+    livello intermedio esisteva e ordinava al rovescio: il punteggio parte
+    dal peso del TIPO di fonte, quindi un dato di calendario marginale
+    scavalcava una notizia sostanziale, e il colore raccontava da dove
+    veniva la voce invece di quanto contasse.
+
+    Il parametro resta nella firma solo per non rompere i richiami esistenti
+    ed e' volutamente ignorato.
     """
-    if voce.get("esito") == "avviso" or voce.get("trattenuto"):
-        return "alta"
-    return "media" if int(voce.get("punteggio", 0)) >= soglia_media else "bassa"
+    return "alta" if (voce.get("esito") == "avviso"
+                      or voce.get("trattenuto")) else "resto"
 
 
 def _ora(voce: dict, fuso: ZoneInfo) -> str:
@@ -386,11 +399,9 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
     except Exception:
         fuso = ZoneInfo("UTC")
     adesso = (quando or datetime.now(timezone.utc)).astimezone(fuso)
-    soglia = int((cfg.get("dashboard") or {}).get("soglia_media", 55))
-
     for v in voci:
-        v["_liv"] = livello(v, soglia)
-    ordine = {"alta": 0, "media": 1, "bassa": 2}
+        v["_liv"] = livello(v)
+    ordine = {"alta": 0, "resto": 1}
     voci.sort(key=lambda v: (ordine[v["_liv"]], -int(v.get("punteggio", 0)),
                              v.get("archiviata", "")), reverse=False)
 
@@ -437,14 +448,14 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
                      'qui sotto, negli avvisi.</div>')
 
     # ---- Importanza alta ------------------------------------------------
-    corpo.append('<h2>Importanza alta <em>meritavano di interromperti</em></h2>')
+    corpo.append('<h2>Urgenti <em>meritavano di interromperti</em></h2>')
     corpo.append("".join(_voce(v, fuso, "alta") for v in alte)
                  or '<div class="vuoto">Niente di urgente nelle ultime 24 ore. '
                     'È una buona notizia, non un guasto.</div>')
 
     # ---- Tutto il resto, filtrabile --------------------------------------
     resto = [v for v in voci if v["_liv"] != "alta"]
-    corpo.append('<h2>Il resto <em>media e bassa importanza</em></h2>')
+    corpo.append('<h2>Il resto <em>contesto, in ordine di rilevanza</em></h2>')
     # Il filtro e' per tipo di fonte, non per livello: il livello si vede gia'
     # a colpo d'occhio dal colore di ogni scheda, mentre "fammi vedere solo i
     # dati macro" e' una domanda che il colore non sa rispondere.
@@ -462,12 +473,13 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
     corpo.append("".join(_voce(v, fuso, v["_liv"]) for v in resto)
                  or '<div class="vuoto">Niente da mostrare.</div>')
     corpo.append('<div class="vuoto" id="nessuno" style="display:none">'
-                 'Nessuna voce in questo livello.</div>')
+                 'Nessuna voce di questo tipo.</div>')
     corpo.append("</div>")
 
     corpo.append(
-        "<footer>🔴 alta: ha superato la soglia dell'interruzione · "
-        "🟡 media: segnale forte, non urgente · 🟢 bassa: contesto.<br>"
+        "<footer>🔴 urgente: ha superato la soglia dell'interruzione, e su "
+        "Telegram \u00e8 arrivato subito · 🟢 il resto: contesto, ordinato "
+        "per rilevanza.<br>"
         "Le voci arrivano da fonti pubbliche e sono riportate come sono. "
         "Questo strumento non dà consigli operativi e non esegue nessuna "
         "operazione: raccoglie, filtra e mostra.</footer></div>")
@@ -536,13 +548,15 @@ if __name__ == "__main__":
 
     # 2) I livelli devono seguire la decisione del filtro, non il punteggio.
     casi = [
-        ("un avviso e' sempre alta", {"esito": "avviso", "punteggio": 20}, "alta"),
-        ("trattenuto di notte resta alta", {"esito": "diario", "trattenuto": True,
-                                            "punteggio": 10}, "alta"),
-        ("punteggio alto ma non avviso: media", {"esito": "diario", "punteggio": 70},
-         "media"),
-        ("punteggio basso: bassa", {"esito": "diario", "punteggio": 30}, "bassa"),
-        ("proprio sulla soglia: media", {"esito": "diario", "punteggio": 55}, "media"),
+        ("un avviso e' sempre urgente", {"esito": "avviso", "punteggio": 20}, "alta"),
+        ("non inviato di notte resta urgente", {"esito": "diario",
+                                                "trattenuto": True,
+                                                "punteggio": 10}, "alta"),
+        # Il punteggio non promuove piu' niente: era il difetto del vecchio
+        # livello intermedio, che finiva per separare i tipi di fonte.
+        ("punteggio alto ma non avviso: resto", {"esito": "diario",
+                                                 "punteggio": 90}, "resto"),
+        ("punteggio basso: resto", {"esito": "diario", "punteggio": 30}, "resto"),
     ]
     for nome, v, voluto in casi:
         prove.append((nome, livello(v) == voluto))
