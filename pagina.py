@@ -63,6 +63,15 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V2.0 16/08/2026  il radar guarda anche i mercati, non solo i giornali.
+#                    Fino a ieri sapeva soltanto cosa SCRIVEVANO le testate:
+#                    non poteva dirti che l'oro si era mosso del 2%. Ora
+#                    segue SPY, QQQ, NVDA e GLD da api.nasdaq.com — lo
+#                    stesso host del calendario, nessuna chiave, nessun
+#                    credito — e avvisa a fasce dell'1,5%. Quotazioni
+#                    differite di ~15 minuti, ed e' scritto sulla pagina.
+#                    Quattro fonti nuove: discorsi e testimonianze della
+#                    Fed, Seeking Alpha, EIA energia.
 #   V1.6 16/08/2026  meta' di cio' che il radar mostrava era roba archiviata.
 #                    I feed non sono code di novita' ma archivi scorrevoli:
 #                    su un giro reale, 86 voci su 150 avevano piu' di 36 ore
@@ -103,14 +112,16 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V1.6"
+VERSIONE = "V2.0"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
     "notizia": "notizia", "trimestrale": "trimestrale", "forum": "forum",
+    "prezzo": "movimento di prezzo",
 }
 SIMBOLO = {"evento": "📊", "ufficiale": "🏛", "deposito": "📄",
-           "notizia": "📰", "trimestrale": "💵", "forum": "💬"}
+           "notizia": "📰", "trimestrale": "💵", "forum": "💬",
+           "prezzo": "📈"}
 
 LIVELLI = {
     "alta": ("Urgenti", "Meritavano di interromperti"),
@@ -150,6 +161,22 @@ h2{font-size:12.5px;text-transform:uppercase;letter-spacing:1.1px;color:var(--gr
    display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 h2 em{font-style:normal;font-size:11px;text-transform:none;letter-spacing:0;
       color:var(--gr);opacity:.75;font-weight:400}
+
+/* ---- striscia dei prezzi ---- */
+.prezzi{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.prezzi div{background:var(--ca);border:1px solid var(--bo);border-radius:10px;
+            padding:9px 12px;flex:1 1 120px;min-width:0}
+.prezzi .nome{color:var(--gr);font-size:11px;text-transform:uppercase;
+              letter-spacing:.5px;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis}
+.prezzi .val{font-size:16px;font-weight:640;font-variant-numeric:tabular-nums;
+             margin-top:2px}
+.prezzi .var{font-size:12.5px;font-variant-numeric:tabular-nums;margin-left:6px;
+             font-weight:600}
+.prezzi .su{color:var(--resto)}
+.prezzi .giu{color:var(--alta)}
+.prezzi .fermo{color:var(--gr)}
+.prezzi .nota{color:var(--gr);font-size:10.5px;margin-top:2px}
 
 /* ---- segnalatore di stato ---- */
 .stato{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
@@ -449,6 +476,41 @@ def _riepilogo(testo: str, fuso: ZoneInfo) -> str:
     return "".join(f"<p>{_e(b)}</p>" for b in blocchi)
 
 
+def _prezzi(quotazioni: list[dict]) -> str:
+    """La striscia dei prezzi, in cima.
+
+    E' l'unica parte della pagina che non parla di notizie ma di mercati, e
+    serve a rispondere alla domanda che viene prima di tutte: "si e' mosso
+    qualcosa?". Le notizie qui sotto dicono poi perche'.
+
+    Il ritardo va scritto, non sottinteso: una quotazione differita di un
+    quarto d'ora presentata come attuale sarebbe un'informazione falsa in un
+    contesto dove i minuti contano.
+    """
+    if not quotazioni:
+        return ""
+    fuori = ['<div class="prezzi">']
+    differite = False
+    for q in quotazioni:
+        v = float(q.get("variazione") or 0)
+        classe = "su" if v > 0.005 else ("giu" if v < -0.005 else "fermo")
+        segno = "+" if v > 0 else ""
+        differite = differite or bool(q.get("differito"))
+        chiuso = "" if q.get("aperto") else ' <span class="nota">· chiuso</span>'
+        fuori.append(
+            f'<div><div class="nome">{_e(q.get("nome") or q.get("simbolo"))}</div>'
+            f'<div class="val">{float(q.get("prezzo") or 0):,.2f}'
+            f'<span class="var {classe}">{segno}{v:.2f}%</span></div>'
+            f'<div class="nota">{_e(q.get("simbolo"))}{chiuso}</div></div>')
+    fuori.append("</div>")
+    if differite:
+        fuori.append('<div class="sotto" style="margin-top:-12px">'
+                     'Quotazioni differite di circa 15 minuti: servono a sapere '
+                     'che qualcosa si è mosso, non a entrare su un movimento '
+                     'mentre accade.</div>')
+    return "".join(fuori)
+
+
 def _segnalatore(adesso: datetime, salute: dict, cfg: dict) -> str:
     """La striscia di stato in cima, piu' un riquadro se qualcosa e' rotto.
 
@@ -491,7 +553,8 @@ def _segnalatore(adesso: datetime, salute: dict, cfg: dict) -> str:
 
 
 def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
-               riepilogo: dict | None = None, salute: dict | None = None) -> str:
+               riepilogo: dict | None = None, salute: dict | None = None,
+               quotazioni: list[dict] | None = None) -> str:
     """L'intera pagina come stringa. Nessun file toccato: cosi' e' provabile."""
     try:
         fuso = ZoneInfo(str(((cfg.get("avvisi") or {}).get("silenzio") or {})
@@ -513,6 +576,7 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
              f'<div class="sotto">generata {adesso.strftime("%d/%m/%Y alle %H:%M")}'
              f' · voci raccolte nelle ultime 24 ore</div>',
              _segnalatore(adesso, salute or {}, cfg),
+             _prezzi(quotazioni or []),
              '<div class="conta">']
     for liv, (nome, _) in LIVELLI.items():
         corpo.append(f'<div class="{liv}"><b>{conte[liv]}</b>'
@@ -597,20 +661,22 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
 
 
 def scrivi(voci: list[dict], cfg: dict, cartella: Path,
-           riepilogo: dict | None = None, salute: dict | None = None) -> Path:
+           riepilogo: dict | None = None, salute: dict | None = None,
+           quotazioni: list[dict] | None = None) -> Path:
     """Scrive index.html e dati.json. Restituisce il percorso della pagina."""
     cartella = Path(cartella)
     cartella.mkdir(parents=True, exist_ok=True)
 
     pagina = cartella / "index.html"
-    pagina.write_text(costruisci(voci, cfg, riepilogo=riepilogo, salute=salute),
-                      encoding="utf-8")
+    pagina.write_text(costruisci(voci, cfg, riepilogo=riepilogo, salute=salute,
+                                 quotazioni=quotazioni), encoding="utf-8")
 
     # I dati anche in JSON: se un domani vuoi farci un grafico o leggerli da
     # un altro programma, non devi rileggerli dall'HTML.
     (cartella / "dati.json").write_text(
         json.dumps({"aggiornato": datetime.now(timezone.utc).isoformat(),
                     "riepilogo": riepilogo or {}, "salute": salute or {},
+                    "quotazioni": quotazioni or [],
                     "voci": voci}, ensure_ascii=False),
         encoding="utf-8")
 

@@ -100,6 +100,48 @@ feed:
     tipo: ufficiale
     attivo: true
 
+  # I DISCORSI dei banchieri centrali. Rarissimi — misurato, l'ultimo
+  # risaliva a dieci giorni prima — e proprio per questo preziosi: volume
+  # basso vuol dire rumore zero, e quando Powell testimonia al Congresso
+  # quello e' l'evento della settimana.
+  - nome: "Fed discorsi"
+    url: "https://www.federalreserve.gov/feeds/speeches.xml"
+    tipo: ufficiale
+    attivo: true
+    max_voci: 15
+
+  - nome: "Fed testimonianze"
+    url: "https://www.federalreserve.gov/feeds/testimony.xml"
+    tipo: ufficiale
+    attivo: true
+    max_voci: 15
+
+  # Notizie di mercato sostanziose: nel campione provato dava cose come
+  # "Jane Street lost $15B in July" e lo stallo con l'Iran sul greggio.
+  - nome: "Seeking Alpha"
+    url: "https://seekingalpha.com/market_currents.xml"
+    tipo: notizia
+    attivo: true
+    max_voci: 25
+
+  # Scorte petrolifere e note sull'energia. Settimanale, ma quando esce
+  # muove il greggio e a cascata l'inflazione attesa.
+  - nome: "EIA energia"
+    url: "https://www.eia.gov/rss/todayinenergy.xml"
+    tipo: ufficiale
+    attivo: true
+    max_voci: 15
+    veloce: false
+
+  # SCARTATE dopo averle provate il 16/08/2026, e la ragione conta:
+  #   Reuters (401), AP (403), BLS (403), Benzinga (403) — ci bloccano.
+  #   WSJ — dichiara articoli di un anno e mezzo fa: date inutilizzabili.
+  #   Nasdaq notizie — la piu' fresca di tutte (zero ore!) ma e' syndication
+  #     da Motley Fool: "These 5 AI Stocks Have Returned 300%-Plus".
+  #     Aggiungerla annullerebbe il lavoro fatto sul filtro.
+  #   FT companies — giornalismo vero, ma su singole aziende europee:
+  #     fuori dall'ambito macro che ti interessa.
+
   # I forum sono i piu' rapidi sulle notizie improvvise e i piu' rumorosi
   # su tutto il resto. Restano a punteggio basso: servono a confermare,
   # non a innescare.
@@ -323,6 +365,44 @@ panoramica:
 # ---------------------------------------------------------------------
 # DASHBOARD
 # ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# MONITOR DEI PREZZI
+#
+# L'unico pezzo che guarda i mercati e non i giornali. Fino alla V1.6 il
+# radar sapeva solo cosa SCRIVEVANO le testate: non poteva dirti che l'oro
+# si era mosso del 2%.
+#
+# La fonte e' api.nasdaq.com, lo stesso host del calendario economico:
+# nessuna chiave, nessun credito. Provata contro Twelve Data il
+# 16/08/2026, i prezzi coincidono al centesimo.
+#
+# LIMITE DICHIARATO: le quotazioni sono DIFFERITE di circa un quarto
+# d'ora. Non e' uno strumento per entrare su un movimento mentre accade —
+# serve a sapere che qualcosa si e' mosso e a metterlo accanto alle
+# notizie di quella mezz'ora.
+# ---------------------------------------------------------------------
+prezzi:
+  attivo: true
+  ogni_minuti: 5          # piu' fitto del ciclo notizie non avrebbe senso
+  soglia_pct: 1.5         # sotto questa variazione non e' una notizia
+
+  # Gli avvisi vanno a fasce: superato l'1,5% parte un avviso, poi silenzio
+  # fino al 3%, poi fino al 4,5%. Senza, un titolo fermo a -1,6% per tre ore
+  # manderebbe un avviso ogni cinque minuti.
+
+  # A mercato chiuso il prezzo e' fermo da giorni: segnalarlo sarebbe
+  # rumore. Lo stato del mercato lo dichiara la fonte stessa, ed e' piu'
+  # solido che dedurlo da un orologio e da un calendario di festivita'.
+  anche_a_mercato_chiuso: false
+
+  simboli:
+    - {simbolo: "SPY",  classe: "etf",    nome: "S&P 500"}
+    - {simbolo: "QQQ",  classe: "etf",    nome: "Nasdaq 100"}
+    - {simbolo: "NVDA", classe: "stocks", nome: "Nvidia"}
+    # L'oro come future (GC:CMX) risponde ma senza dati. GLD e' l'ETF sul
+    # metallo fisico: e' la strada che funziona.
+    - {simbolo: "GLD",  classe: "etf",    nome: "Oro (GLD)"}
+
 dashboard:
   # Il livello intermedio e' stato tolto in V1.4: restava una soglia su un
   # punteggio che misura il tipo di fonte, non l'importanza. Due livelli.

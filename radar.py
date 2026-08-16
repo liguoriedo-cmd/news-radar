@@ -37,6 +37,7 @@ import avvisi as A
 import digest
 import filtro as F
 import pagina
+import prezzi as P
 import pubblica
 from sources import Nasdaq, Raccolta
 
@@ -90,6 +91,7 @@ class Radar:
         # configurazione. Sul NAS e' una cartella come un'altra.
         self.sito = Path(os.environ.get("CARTELLA_SITO", RADICE / "docs"))
         self.pubblicatore = pubblica.Pubblicatore(cfg, self.stato_path)
+        self.prezzi = P.Prezzi(cfg, self.stato_path)
 
     # -- archivio -----------------------------------------------------------
 
@@ -127,9 +129,54 @@ class Radar:
 
     # -- il ciclo -----------------------------------------------------------
 
+    def _quotazioni(self) -> tuple[list[dict], list[dict]]:
+        """Legge i prezzi, ma non a ogni giro.
+
+        Il ciclo notizie e' di tre minuti, i prezzi si guardano ogni cinque:
+        piu' fitto non aggiungerebbe niente, visto che le quotazioni della
+        fonte sono differite di un quarto d'ora. Restituisce (quotazioni,
+        movimenti da segnalare).
+        """
+        if not self.prezzi.attivo:
+            return [], []
+        stato = self._leggi(self.stato_path, {})
+        ultima = stato.get("ultima_lettura_prezzi")
+        if ultima:
+            try:
+                passati = (datetime.now(timezone.utc)
+                           - datetime.fromisoformat(ultima)).total_seconds() / 60
+                if passati < self.prezzi.ogni_minuti:
+                    # Non e' il momento: si riusano le ultime lette, cosi' la
+                    # pagina continua a mostrarle invece di svuotarsi.
+                    return stato.get("quotazioni") or [], []
+            except (ValueError, TypeError):
+                pass
+
+        quotazioni = self.prezzi.leggi()
+        if not quotazioni:
+            return stato.get("quotazioni") or [], []
+        movimenti = self.prezzi.movimenti(quotazioni)
+
+        stato = self._leggi(self.stato_path, {})     # rileggo: movimenti ha scritto
+        stato["quotazioni"] = quotazioni
+        stato["ultima_lettura_prezzi"] = datetime.now(timezone.utc).isoformat()
+        self._scrivi(self.stato_path, stato)
+        if movimenti:
+            log.info("movimenti di prezzo da segnalare: %s",
+                     ", ".join(f"{m['simbolo']} {m['variazione']:+.2f}%"
+                               for m in movimenti))
+        return quotazioni, movimenti
+
     def ciclo(self, completa: bool = True) -> dict:
         voci = F.prepara(self.raccolta.tutto(completa=completa))
         alert, diario, stat = self.filtro.passa(voci)
+
+        # I movimenti di prezzo entrano fra gli avvisi come qualunque altra
+        # voce: da qui in poi il resto del sistema non sa che esistono i
+        # prezzi, e archivio, dashboard e Telegram li trattano uguale.
+        quotazioni, movimenti = self._quotazioni()
+        alert = [P.Prezzi.come_voce(m) for m in movimenti] + alert
+        stat["prezzi"] = len(movimenti)
 
         esito = self.consegna.avvisi(alert)
         if esito["silenzio"] and esito["trattenuti"]:
@@ -154,7 +201,8 @@ class Radar:
         vecchio = self._leggi(self.stato_path, {})
         pagina.scrivi(self.archivio(ore=24), self.cfg, self.sito,
                       riepilogo=vecchio.get("riepilogo"),
-                      salute=vecchio.get("salute"))
+                      salute=vecchio.get("salute"),
+                      quotazioni=quotazioni)
 
         # La pubblicazione e' l'ultimo passo e il meno importante: se GitHub
         # non risponde, la pagina resta scritta sul NAS e il giro dopo ci
