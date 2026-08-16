@@ -169,7 +169,25 @@ class Rss(Client):
     """Testate finanziarie, banche centrali e forum: tutti flussi RSS o Atom."""
 
     def leggi(self, nome: str, url: str, tipo: str = "notizia",
-              max_voci: int = 40) -> list[Voce]:
+              max_voci: int = 40, eta_massima_ore: float = 0) -> list[Voce]:
+        """Legge un flusso RSS, scartando cio' che e' troppo vecchio.
+
+        Il taglio sull'eta' non e' un dettaglio di pulizia: senza, meta' di
+        quello che entra nel sistema e' roba archiviata. Misurato il
+        16/08/2026 su un giro reale, 86 voci su 150 fra testate, banche
+        centrali e forum avevano piu' di 36 ore, e la piu' vecchia era del
+        13/05/2024 — due anni prima.
+
+        I flussi delle banche centrali sono la sorpresa peggiore: BCE e
+        Federal Reserve pubblicano un archivio scorrevole, quindi TUTTI i
+        loro comunicati risultano "presenti" a ogni lettura. Senza questo
+        taglio, una decisione di politica monetaria di settimane prima viene
+        letta come appena uscita e puo' far scattare un avviso.
+
+        La data la dichiara il flusso stesso. Quando non c'e', `_quando`
+        ripiega sull'ora attuale e la voce passa: meglio tenere qualcosa di
+        incerto che buttare una notizia vera per un campo mancante.
+        """
         raw = self._get(url)
         if raw is None:
             return []
@@ -179,7 +197,10 @@ class Rss(Client):
             log.warning("feed illeggibile %s: %s", nome, exc)
             return []
 
+        limite = (adesso() - timedelta(hours=eta_massima_ore)
+                  if eta_massima_ore > 0 else None)
         voci: list[Voce] = []
+        scartate = 0
         for e in (feed.entries or [])[:max_voci]:
             titolo = _pulisci(e.get("title"))
             if not titolo:
@@ -193,6 +214,9 @@ class Rss(Client):
                         break
                     except (TypeError, ValueError):
                         pass
+            if limite is not None and quando < limite:
+                scartate += 1
+                continue
             voci.append(Voce(
                 tipo=tipo,
                 titolo=titolo,
@@ -201,7 +225,11 @@ class Rss(Client):
                 quando=quando,
                 testo=_pulisci(e.get("summary") or e.get("description")),
             ))
-        log.info("%s: %d voci", nome, len(voci))
+        if scartate:
+            log.info("%s: %d voci (%d scartate perche' vecchie)",
+                     nome, len(voci), scartate)
+        else:
+            log.info("%s: %d voci", nome, len(voci))
         return voci
 
 
@@ -376,8 +404,14 @@ class Raccolta:
                 continue
             if not completa and not f.get("veloce", True):
                 continue
-            voci += self.rss.leggi(f["nome"], f["url"], f.get("tipo", "notizia"),
-                                   int(f.get("max_voci", 40)))
+            voci += self.rss.leggi(
+                f["nome"], f["url"], f.get("tipo", "notizia"),
+                int(f.get("max_voci", 40)),
+                # Il taglio vale solo per i flussi RSS. Il calendario ha date
+                # future per costruzione — sono appuntamenti, non pubblicazioni
+                # — e i depositi SEC arrivano gia' solo se recenti.
+                float(f.get("eta_massima_ore",
+                            self.cfg.get("eta_massima_ore", 36))))
             time.sleep(pausa)
 
         if self.cfg.get("calendario", {}).get("attivo", True):
@@ -406,3 +440,62 @@ class Raccolta:
 
         log.info("raccolta: %d voci, %d dopo deduplica", len(voci), len(uniche))
         return uniche
+
+
+if __name__ == "__main__":
+    # Il taglio sull'eta' e' l'unica regola di questo file che butta via
+    # roba: se si rompe, il radar torna a mostrare articoli di due anni fa
+    # oppure — molto peggio — svuota le fonti vive senza dirlo.
+    import sys
+    from unittest.mock import patch
+
+    def finto_feed(ore_delle_voci):
+        """Un flusso finto con voci di eta' nota."""
+        base = adesso()
+        entries = []
+        for i, ore in enumerate(ore_delle_voci):
+            q = base - timedelta(hours=ore)
+            entries.append({
+                "title": f"voce di {ore} ore fa",
+                "link": f"http://esempio.test/{i}",
+                "published_parsed": q.timetuple(),
+                "summary": "",
+            })
+        return type("F", (), {"entries": entries})()
+
+    prove = []
+    casi = [
+        ("nessun taglio: passa tutto", 0, [1, 50, 200, 5000], 4),
+        ("taglio a 72 ore", 72, [1, 50, 71, 73, 200], 3),
+        ("weekend: la notizia di venerdi' passa", 72, [66, 70], 2),
+        ("l'archivio non passa", 72, [84, 119, 215, 407], 0),
+        ("due anni fa", 72, [24 * 730], 0),
+    ]
+    for nome, ore, eta, atteso in casi:
+        with patch.object(Rss, "_get", return_value=b"x"), \
+             patch("feedparser.parse", return_value=finto_feed(eta)):
+            voci = Rss().leggi("prova", "http://x", "notizia", 40, ore)
+        ok = len(voci) == atteso
+        prove.append(ok)
+        print(f"  {'ok ' if ok else 'NO '} {nome}: tenute {len(voci)}/{len(eta)} "
+              f"(attese {atteso})")
+
+    # Senza data dichiarata la voce deve passare: meglio l'incerto del nulla.
+    senza = type("F", (), {"entries": [{"title": "senza data", "link": "",
+                                        "summary": ""}]})()
+    with patch.object(Rss, "_get", return_value=b"x"), \
+         patch("feedparser.parse", return_value=senza):
+        voci = Rss().leggi("prova", "http://x", "notizia", 40, 72)
+    ok = len(voci) == 1
+    prove.append(ok)
+    print(f"  {'ok ' if ok else 'NO '} voce senza data: passa comunque")
+
+    # I valori del calendario: "&nbsp;" e i trattini non sono numeri.
+    for grezzo, atteso in (("&nbsp;", None), ("-", None), ("n/a", None),
+                           ("202K", "202K"), ("5.50%", "5.50%")):
+        ok = valore(grezzo) == atteso
+        prove.append(ok)
+        print(f"  {'ok ' if ok else 'NO '} valore({grezzo!r}) -> {valore(grezzo)!r}")
+
+    print(f"\n{sum(prove)}/{len(prove)} controlli superati")
+    sys.exit(0 if all(prove) else 1)

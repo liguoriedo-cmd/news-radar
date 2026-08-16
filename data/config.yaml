@@ -30,6 +30,34 @@ ritmo:
 pausa_fra_fonti_secondi: 1.5    # rispetta i limiti dei flussi gratuiti
 memoria_giorni: 7               # per quanto si ricorda una voce gia' vista
 
+# ETA' MASSIMA DI UNA VOCE, in ore. Vale solo per i flussi RSS.
+#
+# Serve perche' i feed non sono code di novita': sono archivi scorrevoli.
+# Misurato il 16/08/2026 su un giro reale: 86 voci su 150 fra testate,
+# banche centrali e forum avevano piu' di 36 ore, e la piu' vecchia era del
+# 13/05/2024 — due anni prima. Senza questo taglio, meta' di cio' che il
+# radar mostra e' roba archiviata.
+#
+# Il caso peggiore erano BCE e Federal Reserve: pubblicano l'intero archivio
+# dei comunicati, quindi TUTTI risultavano presenti a ogni lettura. Una
+# decisione di politica monetaria di settimane prima veniva letta come
+# appena uscita, e poteva far scattare un avviso.
+#
+# PERCHE' 72 E NON 24. Nel fine settimana le testate finanziarie si
+# fermano: misurato di domenica, l'articolo CNBC piu' recente aveva 66 ore
+# e il comunicato BCE piu' recente 70 — sono le notizie di venerdi', ed
+# erano le piu' fresche esistenti. Con un taglio a 24 o 36 ore la pagina
+# si sarebbe svuotata ogni weekend.
+#
+# Il numero non e' arbitrario: fra la notizia piu' recente e l'archivio
+# c'e' un salto netto. Sullo stesso giro, dopo le 70 ore si passava a 84,
+# 119, 215, 407. Settantadue cade dentro quel vuoto.
+#
+# Non tocca il calendario (le sue date sono appuntamenti futuri) ne' i
+# depositi SEC (arrivano gia' solo se recenti). Se un flusso non dichiara
+# la data, la voce passa: meglio tenere l'incerto che buttare il vero.
+eta_massima_ore: 72
+
 # Richiesto dalla SEC per accedere a EDGAR: nome e contatto reali.
 # Senza, EDGAR risponde 403 e viene saltato.
 contatto_sec: "Radar Notizie Personale liguoriedo@gmail.com"

@@ -63,6 +63,14 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V1.6 16/08/2026  meta' di cio' che il radar mostrava era roba archiviata.
+#                    I feed non sono code di novita' ma archivi scorrevoli:
+#                    su un giro reale, 86 voci su 150 avevano piu' di 36 ore
+#                    e la piu' vecchia era del 13/05/2024. BCE e Fed erano il
+#                    caso peggiore — tutti i loro comunicati risultavano
+#                    presenti a ogni lettura, quindi una decisione di
+#                    settimane prima poteva far scattare un avviso. Ora le
+#                    voci RSS oltre le 72 ore vengono scartate alla fonte.
 #   V1.5 15/08/2026  la pagina si aggiorna da sola. Essendo statica restava
 #                    ferma una volta caricata: ora ogni 90 secondi chiede al
 #                    server l'impronta del file (HEAD + ETag, poche decine di
@@ -95,7 +103,7 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V1.5"
+VERSIONE = "V1.6"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
@@ -503,7 +511,7 @@ def costruisci(voci: list[dict], cfg: dict, quando: datetime | None = None,
     corpo = ['<div class="guscio">',
              f'<h1>📡 Radar notizie <span class="ver">{_e(VERSIONE)}</span></h1>',
              f'<div class="sotto">generata {adesso.strftime("%d/%m/%Y alle %H:%M")}'
-             f' · ultime 24 ore</div>',
+             f' · voci raccolte nelle ultime 24 ore</div>',
              _segnalatore(adesso, salute or {}, cfg),
              '<div class="conta">']
     for liv, (nome, _) in LIVELLI.items():
