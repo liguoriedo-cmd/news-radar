@@ -50,14 +50,40 @@ log = logging.getLogger("pubblica")
 
 API = "https://api.github.com/repos/{repo}/contents/{percorso}"
 
-# L'orario di aggiornamento cambia a ogni giro: se restasse nel confronto,
-# ogni pagina risulterebbe diversa dalla precedente e il freno sui commit
-# non servirebbe a niente.
-VOLATILE = re.compile(r'<div class="sotto">.*?</div>', re.S)
+# Tutto cio' che cambia a ogni giro SENZA che sia cambiato il contenuto.
+# Se restasse nel confronto, ogni pagina risulterebbe diversa dalla
+# precedente e il freno sui commit non servirebbe a niente.
+#
+# La lista e' cresciuta per necessita', e la storia vale la pena: all'inizio
+# bastava togliere la riga "generata alle...". Poi la V1.2 ha aggiunto il
+# segnalatore di stato, che incide l'ora dentro un attributo — e da quel
+# giorno il freno non frenava piu' niente. Se ne e' avuta prova il
+# 18/08/2026: 17 pubblicazioni all'ora, una per ogni giro, 834 commit in
+# due giorni e 13 MB di repository.
+#
+# Regola per il futuro: ogni volta che si aggiunge alla pagina qualcosa che
+# cambia da solo — un orologio, un contatore, una quotazione — va aggiunto
+# anche qui, altrimenti il freno si rompe in silenzio.
+VOLATILE = (
+    re.compile(r'<div class="sotto">.*?</div>', re.S),   # "generata alle..."
+    re.compile(r'data-quando="[^"]*"'),                  # ora nel segnalatore
+    re.compile(r'<div class="prezzi">.*?</div></div>', re.S),  # le quotazioni
+)
 
 
 def _impronta(testo: str) -> str:
-    return hashlib.sha1(VOLATILE.sub("", testo).encode()).hexdigest()[:16]
+    """L'impronta del CONTENUTO, non della pagina.
+
+    Le quotazioni sono escluse di proposito: cambiano di centesimi ogni
+    cinque minuti e ripubblicare per quello sarebbe lo stesso spreco. Se un
+    prezzo si muove abbastanza da contare, genera un avviso — e l'avviso e'
+    contenuto, quindi la pagina viene pubblicata comunque. Per il resto ci
+    pensa il battito, che ripubblica a intervalli fissi.
+    """
+    pulito = testo
+    for rx in VOLATILE:
+        pulito = rx.sub("", pulito)
+    return hashlib.sha1(pulito.encode()).hexdigest()[:16]
 
 
 class Pubblicatore:
@@ -222,9 +248,22 @@ if __name__ == "__main__":
          'ultime 24 ore</div><p>stessa notizia</p>')
     b = a.replace("10:00", "10:03")
     c = a.replace("stessa notizia", "notizia diversa")
+    # Il segnalatore di stato: e' l'attributo che ha rotto il freno per tre
+    # giorni senza che nessuno se ne accorgesse.
+    d = a + '<div class="stato" data-quando="2026-08-18T11:49:54" data-soglia="45">x</div>'
+    e = d.replace("11:49:54", "11:52:11")
+    # Le quotazioni cambiano di centesimi in continuazione.
+    f = d + '<div class="prezzi"><div>SPY 776.34</div></div>'
+    g = f.replace("776.34", "776.51")
+
     prove = [
         ("solo l'orario cambiato: non si ripubblica", _impronta(a) == _impronta(b)),
         ("contenuto cambiato: si ripubblica", _impronta(a) != _impronta(c)),
+        ("solo l'ora del segnalatore: non si ripubblica", _impronta(d) == _impronta(e)),
+        ("solo un centesimo di quotazione: non si ripubblica",
+         _impronta(f) == _impronta(g)),
+        ("una voce in piu' fa ripubblicare",
+         _impronta(f) != _impronta(f + "<p>notizia nuova</p>")),
     ]
     for nome, ok in prove:
         print(f"  {'ok ' if ok else 'NO '} {nome}")
