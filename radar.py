@@ -199,7 +199,11 @@ class Radar:
         # quando non e' successo niente: una pagina ferma a ieri sembra
         # rotta, e non si distingue da un radar che si e' davvero fermato.
         vecchio = self._leggi(self.stato_path, {})
-        pagina.scrivi(self.archivio(ore=24), self.cfg, self.sito,
+        # Il raggruppamento si fa QUI e non nel filtro: le repliche della
+        # stessa storia arrivano a giri diversi, e per la memoria sono voci
+        # distinte perche' hanno titoli distinti. Solo guardando le 24 ore
+        # tutte insieme si vede che raccontano lo stesso fatto.
+        pagina.scrivi(F.raggruppa(self.archivio(ore=24)), self.cfg, self.sito,
                       riepilogo=vecchio.get("riepilogo"),
                       salute=vecchio.get("salute"),
                       quotazioni=quotazioni)

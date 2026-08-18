@@ -311,6 +311,10 @@ avvisi:
     - "exhibition"
     - "vacancy"
     - "obituary"
+    # "Powell Industries" e un fabbricante di apparecchiature elettriche,
+    # non Jerome Powell: il 18/08/2026 la vendita di azioni di un suo
+    # dirigente e finita fra gli avvisi urgenti.
+    - "powell industries"
     # Il riepilogo di giornata che Yahoo e simili aggiornano di continuo.
     # Contiene sempre "S&P 500", "Nasdaq" e "inflation", quindi supera ogni
     # regola, ma e' una cronaca: quando arriva, quello che dice lo sai gia'.

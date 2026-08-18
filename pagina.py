@@ -63,6 +63,15 @@ log = logging.getLogger("pagina")
 # aggiornamento sul NAS non c'e' modo di saperlo se non a memoria.
 #
 # Storico, dalla piu' recente:
+#   V2.1 18/08/2026  il dashboard mostrava 165 voci verdi. Due cause: una
+#                    sola parola debole bastava a tenere una notizia — la
+#                    regola dei due termini valeva solo per gli avvisi, non
+#                    per cio' che si tiene, e 115 delle 148 notizie erano
+#                    entrate cosi'. E le agenzie riscrivono lo stesso fatto:
+#                    dodici titoli raccontavano il riprezzamento delle
+#                    probabilita' di rialzo. Ora i titoli che condividono
+#                    piu' di meta' delle parole significative diventano una
+#                    voce sola, con scritto su quante fonti e' uscita.
 #   V2.0 16/08/2026  il radar guarda anche i mercati, non solo i giornali.
 #                    Fino a ieri sapeva soltanto cosa SCRIVEVANO le testate:
 #                    non poteva dirti che l'oro si era mosso del 2%. Ora
@@ -112,7 +121,7 @@ log = logging.getLogger("pagina")
 #   V1   13/08/2026  prima versione completa: dieci fonti, filtro a tre
 #                    livelli, panoramica del mattino, avvisi Telegram con
 #                    silenzio notturno.
-VERSIONE = "V2.0"
+VERSIONE = "V2.1"
 
 ETICHETTA = {
     "evento": "dato macro", "ufficiale": "banca centrale", "deposito": "deposito SEC",
@@ -454,6 +463,10 @@ def _voce(v: dict, fuso: ZoneInfo, liv: str) -> str:
         if cifre:
             pezzi.append(f'<div class="cifre">{"".join(cifre)}</div>')
 
+    if v.get("simili"):
+        n = int(v["simili"]) + 1
+        pezzi.append(f'<div class="cifre"><span>ripresa da <b>{n}</b> fonti</span>'
+                     f'</div>')
     if v.get("motivi"):
         pezzi.append(f'<div class="perche">{_e(" · ".join(v["motivi"]))}</div>')
     pezzi.append("</div>")

@@ -515,9 +515,16 @@ class Filtro:
             return "avviso", 0
         # Tutto il resto e' contesto: finisce sul dashboard, dove lo leggi
         # quando vuoi tu invece che quando lo decide un titolista.
+        #
+        # Ma una parola debole SOLA non basta nemmeno per finire in pagina, e
+        # per la stessa ragione per cui non basta a interrompere: "fed"
+        # compare in mezzo giornale e "nasdaq" in un titolo su tre. Applicare
+        # la regola dei due termini solo agli avvisi e non a cio' che si
+        # tiene era un'incoerenza: il 18/08/2026 il dashboard conteneva 148
+        # notizie, di cui 115 entrate per una parola debole soltanto.
         if forti or len(deboli) >= 2 or riferimenti:
             return "diario", 0
-        return ("diario" if deboli else "scarta"), 0
+        return "scarta", 0
 
     # -- passata completa ---------------------------------------------------
 
@@ -563,6 +570,71 @@ class Filtro:
         log.info("filtro: %(totali)d viste, %(avvisi)d avvisi, "
                  "%(diario)d a diario, %(scartate)d scartate", stat)
         return avvisi, diario, stat
+
+
+# Parole troppo comuni per distinguere una storia da un'altra.
+VUOTE = frozenset(
+    "a an the of to in on for as at by with and or is are was were be been "
+    "from that this it its his her their our new after before over up down "
+    "more less than about into out off but not no so if we you has have had "
+    "il lo la i gli le di da con su per tra fra che non piu meno dopo prima "
+    "come dove quando anche ancora".split())
+
+
+def _nocciolo(titolo: str) -> frozenset:
+    """Le parole che identificano una storia, senza le parole di servizio."""
+    p = re.sub(r"[^a-z0-9 ]", " ", str(titolo or "").lower()).split()
+    return frozenset(x for x in p if len(x) > 2 and x not in VUOTE)
+
+
+def raggruppa(voci: list[dict], somiglianza: float = 0.55) -> list[dict]:
+    """Unisce i titoli che raccontano la stessa storia.
+
+    La deduplica esatta non basta: le agenzie riscrivono lo stesso fatto con
+    parole diverse. Il 18/08/2026 il dashboard mostrava "Dollar falls against
+    euro as markets trim rate hike bets" e "Dollar edges lower against euro
+    as markets trim rate hike bets" come due voci — e tre varianti di "Stock
+    market today: Dow, S&P 500, Nasdaq...".
+
+    Si confrontano le parole significative dei titoli: se ne condividono piu'
+    della meta', e' la stessa storia. Sopravvive quella col punteggio piu'
+    alto, che si porta dietro il conto delle altre — e quel numero e'
+    informazione in piu', non solo pulizia: sapere che sei testate raccontano
+    lo stesso fatto dice qualcosa su quanto conta.
+
+    Non tocca eventi, depositi e prezzi: li' i titoli si somigliano per
+    costruzione ("4-Week Bill Auction", "8-K - TIZIO CORP") e unirli
+    cancellerebbe voci distinte.
+    """
+    raggruppabili = {"notizia", "forum", "ufficiale"}
+    gruppi: list[list[dict]] = []
+    intatte: list[dict] = []
+    for v in voci:
+        if v.get("tipo") not in raggruppabili:
+            intatte.append(v)
+            continue
+        nucleo = _nocciolo(v.get("titolo"))
+        for g in gruppi:
+            base = g[0]["_nucleo"]
+            if not base or not nucleo:
+                continue
+            if len(base & nucleo) / len(base | nucleo) >= somiglianza:
+                g.append(dict(v, _nucleo=nucleo))
+                break
+        else:
+            gruppi.append([dict(v, _nucleo=nucleo)])
+
+    fuori = list(intatte)
+    for g in gruppi:
+        capo = max(g, key=lambda v: int(v.get("punteggio", 0)))
+        capo = {k: x for k, x in capo.items() if k != "_nucleo"}
+        if len(g) > 1:
+            fonti = sorted({str(v.get("fonte", "")) for v in g})
+            capo["simili"] = len(g) - 1
+            capo["motivi"] = list(capo.get("motivi") or []) + [
+                f"stessa storia su {len(g)} fonti: {', '.join(fonti[:4])}"]
+        fuori.append(capo)
+    return fuori
 
 
 def prepara(voci) -> list[dict]:
@@ -761,6 +833,34 @@ if __name__ == "__main__":
     f = Filtro(cfg, Path(tempfile.mkdtemp()) / "m.json")
     atteso_e("primo avvio",
              f.valuta(voce(titolo="Powell signals rate cut")), "diario")
+
+    # -- raggruppamento delle storie ripetute --------------------------------
+    def _g(titolo, tipo="notizia", punteggio=50, fonte="X"):
+        return {"tipo": tipo, "titolo": titolo, "fonte": fonte,
+                "punteggio": punteggio, "motivi": [], "dati": {}}
+
+    gruppo = raggruppa([
+        _g("Dollar falls against euro as markets trim rate hike bets", punteggio=40),
+        _g("Dollar edges lower against euro as markets trim rate hike bets",
+           punteggio=55, fonte="Y"),
+        _g("Nvidia halts shipments after export ban"),
+    ])
+    prove.append(("due varianti della stessa storia diventano una",
+                  str(len(gruppo)), "2"))
+    unita = [v for v in gruppo if v.get("simili")]
+    prove.append(("sopravvive quella col punteggio piu' alto",
+                  unita[0]["titolo"][:12] if unita else "-", "Dollar edges"))
+    prove.append(("il conto delle fonti finisce nei motivi",
+                  "si" if unita and any("2 fonti" in m for m in unita[0]["motivi"])
+                  else "no", "si"))
+
+    # Le aste e i depositi si somigliano per costruzione: NON vanno uniti.
+    aste = raggruppa([
+        _g("4-Week Bill Auction", tipo="evento"),
+        _g("8-Week Bill Auction", tipo="evento"),
+        _g("52-Week Bill Auction", tipo="evento"),
+    ])
+    prove.append(("le aste restano distinte", str(len(aste)), "3"))
 
     falliti = [(n, o, v) for n, o, v in prove if o != v]
     for n, o, v in prove:
